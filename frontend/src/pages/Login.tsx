@@ -7,17 +7,17 @@ const Login = () => {
   const [username, setUsername] = useState("");
   const [dni, setDni] = useState("");
   const [error, setError] = useState("");
-  const { login } = useAppContext();
+  const { login, isLoading } = useAppContext();
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     if (!username || !dni) {
       setError("Por favor, complete todos los campos.");
       return;
     }
-    const success = login(username, dni);
+    const success = await login(username, dni);
     if (success) {
       navigate("/dashboard");
     } else {
@@ -82,9 +82,10 @@ const Login = () => {
 
             <button
               type="submit"
-              className="w-full py-2.5 rounded-lg bg-accent text-accent-foreground font-semibold text-sm hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              disabled={isLoading}
+              className="w-full py-2.5 rounded-lg bg-accent text-accent-foreground font-semibold text-sm hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50"
             >
-              Iniciar sesión
+              {isLoading ? "Iniciando sesión..." : "Iniciar sesión"}
             </button>
           </form>
         </div>

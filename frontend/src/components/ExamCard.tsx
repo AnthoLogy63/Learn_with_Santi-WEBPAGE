@@ -14,13 +14,12 @@ const ExamCard = ({ exam }: ExamCardProps) => {
     <div className="bg-card rounded-xl border border-border p-6 flex flex-col justify-between hover:shadow-md transition-shadow animate-fade-in">
       <div>
         <div className="flex items-start justify-between mb-4">
-          <span className="text-3xl">{exam.icon}</span>
+          <span className="text-3xl">📝</span>
           <span
-            className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${
-              isCompleted
+            className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${isCompleted
                 ? "bg-teal/10 text-teal"
                 : "bg-success/10 text-success"
-            }`}
+              }`}
           >
             {isCompleted ? (
               <>
@@ -35,12 +34,8 @@ const ExamCard = ({ exam }: ExamCardProps) => {
             )}
           </span>
         </div>
-        <h3 className="text-base font-semibold text-foreground mb-1">{exam.title}</h3>
-        {exam.result && (
-          <p className="text-sm text-muted-foreground">
-            Último puntaje: <span className="font-semibold text-warning">{exam.result.score} pts</span>
-          </p>
-        )}
+        <h3 className="text-base font-semibold text-foreground mb-1">{exam.name}</h3>
+        <p className="text-xs text-muted-foreground mb-4 line-clamp-2">{exam.description}</p>
       </div>
 
       <button

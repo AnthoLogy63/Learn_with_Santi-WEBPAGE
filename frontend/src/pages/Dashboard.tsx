@@ -30,14 +30,14 @@ const Dashboard = () => {
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex flex-col lg:flex-row gap-8">
+        <div className="flex flex-col lg:flex-row gap-8 items-start">
           {/* Sidebar */}
-          <aside className="w-full lg:w-72 lg:shrink-0">
+          <aside className="w-full lg:w-72 lg:shrink-0 lg:sticky lg:top-20">
             <UserProfile />
           </aside>
 
           {/* Main */}
-          <main className="flex-1">
+          <main className="flex-1 min-h-[calc(100vh-160px)]">
             <h2 className="text-xl font-bold text-foreground mb-1">Exámenes disponibles</h2>
             <p className="text-sm text-muted-foreground mb-6">
               Selecciona un examen para comenzar tu evaluación.

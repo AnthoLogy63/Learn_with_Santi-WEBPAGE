@@ -1,103 +1,134 @@
-import React, { createContext, useContext, useState, ReactNode } from "react";
+import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
+
+const API_BASE_URL = "http://localhost:8000/api";
 
 export interface ExamResult {
   score: number;
-  totalQuestions: number;
-  correctAnswers: number;
-  incorrectAnswers: number;
-  completedAt: string;
+  status: string;
+  counts_for_score: boolean;
+  total_user_score: number;
 }
 
 export interface Exam {
-  id: string;
-  title: string;
-  icon: string;
+  id: number;
+  name: string;
+  description: string;
+  is_active: boolean;
   status: "pending" | "completed";
-  result?: ExamResult;
+}
+
+export interface Rank {
+  id: number;
+  name: string;
+  description: string;
+  badge_image: string | null;
 }
 
 export interface User {
+  id: number;
   username: string;
-  fullName: string;
-  avatarUrl?: string;
-  totalPoints: number;
+  dni: string;
+  total_score: number;
+  current_rank: Rank | null;
 }
 
 interface AppState {
   user: User | null;
   exams: Exam[];
   isAuthenticated: boolean;
-  login: (username: string, dni: string) => boolean;
+  isLoading: boolean;
+  login: (username: string, dni: string) => Promise<boolean>;
   logout: () => void;
-  completeExam: (examId: string, result: ExamResult) => void;
+  fetchExams: () => Promise<void>;
+  fetchUserScore: () => Promise<void>;
 }
-
-const defaultExams: Exam[] = [
-  {
-    id: "mi-bonito",
-    title: "Conocimiento General - Mi Bonito",
-    icon: "📘",
-    status: "pending",
-  },
-  {
-    id: "matematicas",
-    title: "Matemáticas Aplicadas",
-    icon: "📐",
-    status: "pending",
-  },
-  {
-    id: "economia",
-    title: "Economía y Análisis Financiero",
-    icon: "📊",
-    status: "pending",
-  },
-];
-
-const MOCK_USER = {
-  username: "jperez",
-  dni: "12345678",
-  fullName: "Juan Pérez García",
-};
 
 const AppContext = createContext<AppState | undefined>(undefined);
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [exams, setExams] = useState<Exam[]>(defaultExams);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [user, setUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem("user");
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [exams, setExams] = useState<Exam[]>([]);
+  const [isAuthenticated, setIsAuthenticated] = useState(!!user);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const login = (username: string, dni: string): boolean => {
-    if (username === MOCK_USER.username && dni === MOCK_USER.dni) {
-      setUser({
-        username: MOCK_USER.username,
-        fullName: MOCK_USER.fullName,
-        totalPoints: 0,
-      });
-      setIsAuthenticated(true);
-      return true;
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchExams();
     }
-    return false;
+  }, [isAuthenticated]);
+
+  const fetchExams = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/exams/`, {
+        headers: {
+          'Authorization': `Basic ${btoa(`${user?.username}:${user?.dni}`)}`,
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        // For simplicity in the UI, we'll map fields
+        setExams(data);
+      }
+    } catch (error) {
+      console.error("Error fetching exams:", error);
+    }
+  };
+
+  const fetchUserScore = async () => {
+    if (!user) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/users/score/${user.id}/`, {
+        headers: {
+          'Authorization': `Basic ${btoa(`${user.username}:${user.dni}`)}`,
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setUser(data);
+        localStorage.setItem("user", JSON.stringify(data));
+      }
+    } catch (error) {
+      console.error("Error fetching user score:", error);
+    }
+  };
+
+  const login = async (username: string, dni: string): Promise<boolean> => {
+    setIsLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/users/login/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, dni }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setUser(data);
+        setIsAuthenticated(true);
+        localStorage.setItem("user", JSON.stringify(data));
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error("Login error:", error);
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const logout = () => {
     setUser(null);
     setIsAuthenticated(false);
-    setExams(defaultExams);
-  };
-
-  const completeExam = (examId: string, result: ExamResult) => {
-    setExams((prev) =>
-      prev.map((exam) =>
-        exam.id === examId ? { ...exam, status: "completed" as const, result } : exam
-      )
-    );
-    setUser((prev) =>
-      prev ? { ...prev, totalPoints: prev.totalPoints + result.score } : prev
-    );
+    localStorage.removeItem("user");
+    setExams([]);
   };
 
   return (
-    <AppContext.Provider value={{ user, exams, isAuthenticated, login, logout, completeExam }}>
+    <AppContext.Provider value={{ user, exams, isAuthenticated, isLoading, login, logout, fetchExams, fetchUserScore }}>
       {children}
     </AppContext.Provider>
   );

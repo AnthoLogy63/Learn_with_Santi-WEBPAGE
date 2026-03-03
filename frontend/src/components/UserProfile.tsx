@@ -7,16 +7,23 @@ const UserProfile = () => {
   if (!user) return null;
 
   const completedCount = exams.filter((e) => e.status === "completed").length;
+  const initials = user.username.slice(0, 2).toUpperCase();
 
   return (
     <div className="bg-card rounded-xl border border-border p-6 animate-slide-in">
       {/* Avatar */}
       <div className="flex flex-col items-center text-center mb-6">
-        <div className="w-20 h-20 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-2xl font-bold mb-3">
-          {user.fullName.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+        <div className="w-20 h-20 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-2xl font-bold mb-3 relative overflow-hidden">
+          {user.current_rank?.badge_image ? (
+            <img src={user.current_rank.badge_image} alt={user.current_rank.name} className="w-full h-full object-cover" />
+          ) : (
+            initials
+          )}
         </div>
-        <h3 className="text-base font-semibold text-foreground">{user.fullName}</h3>
-        <p className="text-sm text-muted-foreground">@{user.username}</p>
+        <h3 className="text-base font-semibold text-foreground">@{user.username}</h3>
+        {user.current_rank && (
+          <p className="text-xs font-bold text-accent uppercase tracking-wider mt-1">{user.current_rank.name}</p>
+        )}
       </div>
 
       {/* Stats */}
@@ -26,7 +33,7 @@ const UserProfile = () => {
             <Trophy className="h-4 w-4 text-warning" />
             <span className="text-sm font-medium text-foreground">Puntos totales</span>
           </div>
-          <span className="text-lg font-bold text-warning">{user.totalPoints}</span>
+          <span className="text-lg font-bold text-warning">{user.total_score}</span>
         </div>
 
         <div className="flex items-center justify-between p-3 rounded-lg bg-secondary">
@@ -41,12 +48,12 @@ const UserProfile = () => {
       <div className="mb-6">
         <div className="flex justify-between text-xs text-muted-foreground mb-1.5">
           <span>Progreso general</span>
-          <span>{Math.round((completedCount / exams.length) * 100)}%</span>
+          <span>{exams.length > 0 ? Math.round((completedCount / exams.length) * 100) : 0}%</span>
         </div>
         <div className="h-2 bg-secondary rounded-full overflow-hidden">
           <div
             className="h-full bg-accent rounded-full transition-all duration-500"
-            style={{ width: `${(completedCount / exams.length) * 100}%` }}
+            style={{ width: `${exams.length > 0 ? (completedCount / exams.length) * 100 : 0}%` }}
           />
         </div>
       </div>

@@ -1,57 +1,118 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAppContext } from "@/context/AppContext";
-import { examQuestions, Question } from "@/data/examData";
-import { ArrowLeft, ArrowRight, CheckCircle2, XCircle, RotateCcw } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, XCircle, RotateCcw, Loader2 } from "lucide-react";
+
+interface Question {
+  id: number;
+  text: string;
+  image: string | null;
+  option_a: string;
+  option_b: string;
+  option_c: string;
+  option_d: string;
+  points: number;
+  time_limit_seconds: number;
+}
 
 const ExamPage = () => {
   const { examId } = useParams<{ examId: string }>();
   const navigate = useNavigate();
-  const { isAuthenticated, exams, completeExam } = useAppContext();
+  const { isAuthenticated, user, fetchUserScore } = useAppContext();
 
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [attemptId, setAttemptId] = useState<number | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<number, number>>({});
+  const [answers, setAnswers] = useState<Record<number, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [showResults, setShowResults] = useState(false);
+  const [results, setResults] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!isAuthenticated) navigate("/", { replace: true });
-  }, [isAuthenticated, navigate]);
+    if (!isAuthenticated) {
+      navigate("/", { replace: true });
+      return;
+    }
 
-  if (!examId || !examQuestions[examId]) {
+    const fetchQuestions = async () => {
+      try {
+        const response = await fetch(`http://localhost:8000/api/exams/${examId}/questions/`, {
+          headers: {
+            'Authorization': `Basic ${btoa(`${user?.username}:${user?.dni}`)}`,
+          },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setQuestions(data.questions);
+          setAttemptId(data.attempt_id);
+        } else {
+          console.error("Failed to fetch questions");
+        }
+      } catch (error) {
+        console.error("Error fetching questions:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchQuestions();
+  }, [examId, isAuthenticated, navigate, user]);
+
+  if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <p className="text-muted-foreground">Examen no encontrado.</p>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-accent mb-4" />
+        <p className="text-muted-foreground">Cargando examen...</p>
       </div>
     );
   }
 
-  const exam = exams.find((e) => e.id === examId);
-  const questions: Question[] = examQuestions[examId];
+  if (questions.length === 0) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <p className="text-muted-foreground">No se encontraron preguntas para este examen.</p>
+      </div>
+    );
+  }
+
   const currentQuestion = questions[currentIndex];
 
-  const handleAnswer = (optionIndex: number) => {
-    setAnswers((prev) => ({ ...prev, [currentQuestion.id]: optionIndex }));
+  const handleAnswer = (optionKey: string) => {
+    setAnswers((prev) => ({ ...prev, [currentQuestion.id]: optionKey }));
   };
 
-  const handleFinish = () => {
-    let correct = 0;
-    questions.forEach((q) => {
-      if (answers[q.id] === q.correctAnswer) correct++;
-    });
-    const score = Math.round((correct / questions.length) * 100);
-    completeExam(examId, {
-      score,
-      totalQuestions: questions.length,
-      correctAnswers: correct,
-      incorrectAnswers: questions.length - correct,
-      completedAt: new Date().toISOString(),
-    });
-    setShowResults(true);
-  };
+  const handleFinish = async () => {
+    if (!attemptId) return;
+    setIsSubmitting(true);
 
-  const correctCount = questions.filter((q) => answers[q.id] === q.correctAnswer).length;
-  const incorrectCount = questions.length - correctCount;
-  const score = Math.round((correctCount / questions.length) * 100);
+    const formattedAnswers = Object.entries(answers).map(([qId, option]) => ({
+      question_id: parseInt(qId),
+      selected_option: option
+    }));
+
+    try {
+      const response = await fetch(`http://localhost:8000/api/exams/attempts/${attemptId}/submit_answers/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Basic ${btoa(`${user?.username}:${user?.dni}`)}`,
+        },
+        body: JSON.stringify({ answers: formattedAnswers }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setResults(data);
+        setShowResults(true);
+        fetchUserScore(); // Update points in context
+      }
+    } catch (error) {
+      console.error("Error submitting answers:", error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   if (showResults) {
     return (
@@ -60,44 +121,20 @@ const ExamPage = () => {
           <div className="w-16 h-16 rounded-full bg-accent/10 text-accent flex items-center justify-center mx-auto mb-4">
             <CheckCircle2 className="h-8 w-8" />
           </div>
-          <h2 className="text-xl font-bold text-foreground mb-1">¡Examen finalizado!</h2>
-          <p className="text-sm text-muted-foreground mb-6">{exam?.title}</p>
+          <h2 className="text-xl font-bold text-foreground mb-1">¡Intento finalizado!</h2>
+          <p className="text-sm text-muted-foreground mb-6">
+            {results?.counts_for_score ? "Este intento sumó puntos a tu perfil." : "Límite de intentos puntuables alcanzado."}
+          </p>
 
-          <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-2 gap-4 mb-6">
             <div className="p-4 rounded-lg bg-secondary">
-              <p className="text-2xl font-bold text-warning">{score}</p>
-              <p className="text-xs text-muted-foreground mt-1">Puntaje</p>
+              <p className="text-2xl font-bold text-warning">{results?.score}</p>
+              <p className="text-xs text-muted-foreground mt-1">Puntaje obtenido</p>
             </div>
             <div className="p-4 rounded-lg bg-secondary">
-              <p className="text-2xl font-bold text-success">{correctCount}</p>
-              <p className="text-xs text-muted-foreground mt-1">Correctas</p>
+              <p className="text-2xl font-bold text-success">{results?.total_user_score}</p>
+              <p className="text-xs text-muted-foreground mt-1">Tu puntaje total</p>
             </div>
-            <div className="p-4 rounded-lg bg-secondary">
-              <p className="text-2xl font-bold text-destructive">{incorrectCount}</p>
-              <p className="text-xs text-muted-foreground mt-1">Incorrectas</p>
-            </div>
-          </div>
-
-          {/* Review answers */}
-          <div className="text-left space-y-3 mb-6 max-h-64 overflow-y-auto">
-            {questions.map((q) => {
-              const userAnswer = answers[q.id];
-              const isCorrect = userAnswer === q.correctAnswer;
-              return (
-                <div key={q.id} className={`p-3 rounded-lg border text-sm ${isCorrect ? "border-success/30 bg-success/5" : "border-destructive/30 bg-destructive/5"}`}>
-                  <div className="flex items-start gap-2">
-                    {isCorrect ? <CheckCircle2 className="h-4 w-4 text-success shrink-0 mt-0.5" /> : <XCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />}
-                    <div>
-                      <p className="text-foreground font-medium">{q.text}</p>
-                      <p className="text-muted-foreground mt-1">
-                        Tu respuesta: {q.options[userAnswer] ?? "Sin responder"} 
-                        {!isCorrect && <> · Correcta: {q.options[q.correctAnswer]}</>}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
           </div>
 
           <div className="flex gap-3">
@@ -108,11 +145,11 @@ const ExamPage = () => {
               Volver al dashboard
             </button>
             <button
-              onClick={() => { setShowResults(false); setAnswers({}); setCurrentIndex(0); }}
+              onClick={() => window.location.reload()}
               className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg bg-accent text-accent-foreground text-sm font-semibold hover:opacity-90 transition-opacity"
             >
               <RotateCcw className="h-4 w-4" />
-              Reintentar
+              Nuevo intento
             </button>
           </div>
         </div>
@@ -129,9 +166,9 @@ const ExamPage = () => {
         <div className="max-w-3xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
           <button onClick={() => navigate("/dashboard")} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
             <ArrowLeft className="h-4 w-4" />
-            Dashboard
+            Salir
           </button>
-          <span className="text-sm font-medium text-foreground">{exam?.title}</span>
+          <span className="text-sm font-medium text-foreground">Examen en progreso</span>
           <span className="text-xs text-muted-foreground">
             {currentIndex + 1} / {questions.length}
           </span>
@@ -152,31 +189,30 @@ const ExamPage = () => {
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
         <div className="animate-fade-in" key={currentQuestion.id}>
           <span className="inline-block text-xs font-semibold text-accent mb-2 uppercase tracking-wider">
-            {currentQuestion.section}
+            Pregunta {currentIndex + 1}
           </span>
           <h2 className="text-lg font-semibold text-foreground mb-6">
             {currentQuestion.text}
           </h2>
 
           <div className="space-y-3">
-            {currentQuestion.options.map((option, idx) => {
-              const isSelected = answers[currentQuestion.id] === idx;
+            {['a', 'b', 'c', 'd'].map((key) => {
+              const optionText = (currentQuestion as any)[`option_${key}`];
+              const isSelected = answers[currentQuestion.id] === key;
               return (
                 <button
-                  key={idx}
-                  onClick={() => handleAnswer(idx)}
-                  className={`w-full text-left p-4 rounded-lg border text-sm transition-all ${
-                    isSelected
+                  key={key}
+                  onClick={() => handleAnswer(key)}
+                  className={`w-full text-left p-4 rounded-lg border text-sm transition-all ${isSelected
                       ? "border-accent bg-accent/5 text-foreground font-medium"
                       : "border-border bg-card text-foreground hover:border-accent/50"
-                  }`}
+                    }`}
                 >
-                  <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold mr-3 ${
-                    isSelected ? "bg-accent text-accent-foreground" : "bg-secondary text-muted-foreground"
-                  }`}>
-                    {String.fromCharCode(65 + idx)}
+                  <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold mr-3 ${isSelected ? "bg-accent text-accent-foreground" : "bg-secondary text-muted-foreground"
+                    }`}>
+                    {key.toUpperCase()}
                   </span>
-                  {option}
+                  {optionText}
                 </button>
               );
             })}
@@ -205,29 +241,13 @@ const ExamPage = () => {
           ) : (
             <button
               onClick={handleFinish}
-              disabled={!allAnswered}
-              className="px-6 py-2 rounded-lg bg-accent text-accent-foreground text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={!allAnswered || isSubmitting}
+              className="px-6 py-2 rounded-lg bg-accent text-accent-foreground text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
+              {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
               Finalizar examen
             </button>
           )}
-        </div>
-
-        {/* Question dots */}
-        <div className="flex items-center justify-center gap-2 mt-8">
-          {questions.map((q, idx) => (
-            <button
-              key={q.id}
-              onClick={() => setCurrentIndex(idx)}
-              className={`w-2.5 h-2.5 rounded-full transition-all ${
-                idx === currentIndex
-                  ? "bg-accent scale-125"
-                  : answers[q.id] !== undefined
-                  ? "bg-accent/40"
-                  : "bg-secondary"
-              }`}
-            />
-          ))}
         </div>
       </div>
     </div>
