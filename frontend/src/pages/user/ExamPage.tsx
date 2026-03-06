@@ -26,7 +26,7 @@ interface Question {
 const ExamPage = () => {
   const { examId } = useParams<{ examId: string }>();
   const navigate = useNavigate();
-  const { isAuthenticated, fetchUserScore } = useAppContext();
+  const { isAuthenticated, fetchUserScore, fetchExams } = useAppContext();
 
   const [questions, setQuestions] = useState<Question[]>([]);
   const [attemptId, setAttemptId] = useState<number | null>(null);
@@ -70,6 +70,27 @@ const ExamPage = () => {
 
     fetchQuestions();
   }, [examId, isAuthenticated, navigate]);
+
+  // Navigation Guard: Prevent accidental reload/close
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!showResults && questions.length > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [showResults, questions.length]);
+
+  const handleExit = () => {
+    if (showResults) {
+      navigate("/dashboard");
+    } else if (window.confirm("¿Estás seguro de que deseas salir? Tu progreso en este intento no se guardará.")) {
+      navigate("/dashboard");
+    }
+  };
 
   if (loading) {
     return (
@@ -202,6 +223,7 @@ const ExamPage = () => {
         setResults(data);
         setShowResults(true);
         fetchUserScore();
+        fetchExams(); // Refresh exam status in dashboard
       } else {
         alert("Error al finalizar la evaluación. Por favor intente de nuevo.");
       }
@@ -256,7 +278,7 @@ const ExamPage = () => {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4">
-            <button onClick={() => navigate("/dashboard")} className="flex-1 py-4 rounded-xl border border-white/10 text-sm font-bold text-white hover:bg-white/10 transition-colors">
+            <button onClick={handleExit} className="flex-1 py-4 rounded-xl border border-white/10 text-sm font-bold text-white hover:bg-white/10 transition-colors">
               Cerrar
             </button>
             <button onClick={() => window.location.reload()} className="flex-1 flex items-center justify-center gap-2 py-4 rounded-xl bg-white text-[#001c4d] text-sm font-bold hover:bg-white/90 transition-all shadow-lg active:scale-95">
@@ -275,19 +297,19 @@ const ExamPage = () => {
         style={{ backgroundImage: `url(${FondoCaja})`, backgroundSize: "cover", backgroundPosition: "center" }}>
         <div className="absolute inset-0 bg-black/90 backdrop-blur-xl" />
         <div className="relative z-10 max-w-sm w-full flex flex-col items-center max-h-[95vh]">
-          <div className={`inline-block px-6 py-2 rounded-full mb-6 font-black uppercase tracking-[0.3em] text-xs ${activeMeme.type === 'happy' ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'}`}>
+          <div className={`inline-block px-6 py-2 rounded-full mb-6 font-black uppercase tracking-[0.3em] text-xs ${activeMeme.type === 'happy' ? 'bg-gradient-to-r from-cyan-500 to-emerald-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.3)]' : 'bg-gradient-to-r from-indigo-500 to-rose-500 text-white shadow-[0_0_20px_rgba(225,29,72,0.3)]'}`}>
             {activeMeme.type === 'happy' ? '¡Tarjeta Feliz!' : '¡Tarjeta Triste!'}
           </div>
 
           <div className="relative mb-8 w-full flex justify-center">
-            <img src={SantiGif} alt="Santi" className="max-w-[260px] w-full h-auto rounded-3xl shadow-[0_0_50px_rgba(251,191,36,0.2)] border-2 border-white/20" />
-            <div className="absolute -bottom-4 bg-white text-[#001c4d] px-6 py-2 rounded-xl shadow-2xl scale-90">
-              <p className="text-[8px] font-black uppercase tracking-widest opacity-40">RACHA</p>
+            <img src={SantiGif} alt="Santi" className={`max-w-[260px] w-full h-auto rounded-3xl border-2 transition-all duration-500 ${activeMeme.type === 'happy' ? 'shadow-[0_0_50px_rgba(16,185,129,0.4)] border-emerald-400/30' : 'shadow-[0_0_50px_rgba(225,29,72,0.4)] border-rose-400/30'}`} />
+            <div className={`absolute -bottom-4 px-6 py-2 rounded-xl shadow-2xl scale-90 transition-colors duration-500 ${activeMeme.type === 'happy' ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'}`}>
+              <p className="text-[8px] font-black uppercase tracking-widest opacity-60">RACHA</p>
               <p className="text-2xl font-black">x{activeMeme.count}</p>
             </div>
           </div>
 
-          <h3 className="text-xl font-bold text-white mb-8 px-4">
+          <h3 className="text-xl font-bold text-white mb-8 px-4 text-center leading-relaxed">
             {activeMeme.type === 'happy'
               ? '¡Santi está muy orgulloso de ti! Vas por buen camino.'
               : 'Santi sabe que puedes hacerlo mejor. ¡No te rindas!'}
@@ -312,7 +334,7 @@ const ExamPage = () => {
 
       <header className="border-b border-white/10 bg-white/5 backdrop-blur-xl relative z-10">
         <div className="max-w-4xl mx-auto px-6 h-16 flex items-center justify-between">
-          <button onClick={() => navigate("/dashboard")} className="flex items-center gap-2 text-sm font-bold text-white/60 hover:text-white transition-colors">
+          <button onClick={handleExit} className="flex items-center gap-2 text-sm font-bold text-white/60 hover:text-white transition-colors">
             <ArrowLeft className="h-4 w-4" />
             Salir
           </button>

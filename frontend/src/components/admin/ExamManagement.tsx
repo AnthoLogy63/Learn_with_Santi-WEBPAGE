@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { examService, Exam } from "@/api/examService";
-import { Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 const ExamManagement = () => {
@@ -49,12 +49,12 @@ const ExamManagement = () => {
     }
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-8 p-2 md:p-0">
             <header className="mb-10">
-                <h1 className="text-4xl lg:text-5xl font-extrabold text-white tracking-tight mb-3 drop-shadow-lg">
+                <h1 className="text-3xl md:text-4xl lg:text-5xl font-extrabold text-white tracking-tight mb-3 drop-shadow-lg">
                     Gestión de Exámenes
                 </h1>
-                <p className="text-lg lg:text-xl text-white/80 max-w-2xl leading-relaxed">
+                <p className="text-base md:text-lg lg:text-xl text-white/80 max-w-2xl leading-relaxed">
                     Habilita o deshabilita las evaluaciones para los usuarios.
                 </p>
             </header>
@@ -73,7 +73,7 @@ const ExamManagement = () => {
                         </div>
 
                         <div className="flex items-center justify-between pt-4 border-t border-white/10">
-                            <span className="text-xs font-bold text-white/40 uppercase tracking-widest">Estado de visibilidad</span>
+                            <span className="text-[10px] md:text-xs font-bold text-white/40 uppercase tracking-widest">Estado de visibilidad</span>
 
                             {/* Toggle Switch */}
                             <button
@@ -89,7 +89,7 @@ const ExamManagement = () => {
 
             {exams.length === 0 && (
                 <div className="text-center py-20 bg-white/5 rounded-3xl border border-white/10">
-                    <p className="text-white/40 font-medium">No hay exámenes registrados en el sistema.</p>
+                    <p className="text-white/40 font-medium text-sm">No hay exámenes registrados en el sistema.</p>
                 </div>
             )}
         </div>

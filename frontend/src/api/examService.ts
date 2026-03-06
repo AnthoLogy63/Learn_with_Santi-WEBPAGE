@@ -40,4 +40,8 @@ export const examService = {
     getUserResults: async (search: string = "", offset: number = 0) => {
         return apiClient(`/exams/attempts/user_results/?search=${search}&offset=${offset}`);
     },
+
+    exportResults: async (examId: number) => {
+        return apiClient(`/exams/${examId}/export_csv/`);
+    },
 };

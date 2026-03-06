@@ -18,7 +18,7 @@ class ExamViewSet(viewsets.ModelViewSet):
             return Exam.objects.all()
         return Exam.objects.filter(is_active=True, is_enabled=True)
     
-    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
     def toggle_enabled(self, request, pk=None):
         if not request.user.is_staff:
             return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
@@ -26,6 +26,98 @@ class ExamViewSet(viewsets.ModelViewSet):
         exam.is_enabled = not exam.is_enabled
         exam.save()
         return Response({'is_enabled': exam.is_enabled})
+
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
+    def export_csv(self, request, pk=None):
+        if not request.user.is_staff:
+            return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
+            
+        import csv
+        from django.http import HttpResponse
+        
+        exam = self.get_object()
+        # Get all questions for this exam to fix columns
+        questions = list(Question.objects.filter(exam=exam).order_by('id'))
+        attempts = Attempt.objects.filter(exam=exam, status='completed').order_by('started_at')
+        
+        response = HttpResponse(content_type='text/csv')
+        filename = f'resultados_{exam.name.replace(" ", "_").lower()}.csv'
+        response['Content-Disposition'] = f'attachment; filename={filename}'
+        
+        # Add UTF-8 BOM for Excel compatibility with accents
+        response.write('\ufeff'.encode('utf8'))
+        
+        writer = csv.writer(response)
+        
+        # Pre-fetch question options for letter mapping
+        options_map = {}
+        for q in questions:
+            options_map[q.id] = list(Option.objects.filter(question=q).order_by('id'))
+        
+        # Header construction
+        header = ['ID', 'Start time', 'Completion time', 'Email', 'Name', 'DNI', 'Total points', 'Nº Intento']
+        for q in questions:
+            header.append(q.text)
+            header.append(f'Points - {q.text}')
+        
+        writer.writerow(header)
+        
+        for row_idx, obj in enumerate(attempts, start=1):
+            # Basic info
+            row = [
+                row_idx,
+                obj.started_at.strftime("%Y-%m-%d %H:%M:%S") if obj.started_at else "",
+                obj.completed_at.strftime("%Y-%m-%d %H:%M:%S") if obj.completed_at else "",
+                obj.user.email,
+                obj.user.username,
+                getattr(obj.user, 'dni', ''),
+                obj.score_obtained,
+                obj.attempt_number,
+            ]
+            
+            # Answer info for each question
+            answers_map = {ans.question_id: ans for ans in AttemptAnswer.objects.filter(attempt=obj)}
+            
+            for q in questions:
+                ans_obj = answers_map.get(q.id)
+                q_options = options_map.get(q.id, [])
+                
+                if ans_obj:
+                    # Format selected answer text with letters
+                    selected_text = ""
+                    if q.question_type == 'multiple_choice':
+                        selected_parts = []
+                        sel_opts = set(ans_obj.selected_options.all().values_list('id', flat=True))
+                        for i, opt in enumerate(q_options):
+                            if opt.id in sel_opts:
+                                selected_parts.append(f"{chr(65+i)}. {opt.text}")
+                        selected_text = ", ".join(selected_parts)
+                    elif q.question_type == 'open_ended':
+                        selected_text = ans_obj.text_response or ""
+                    else:
+                        if ans_obj.selected_option:
+                            index = -1
+                            for i, opt in enumerate(q_options):
+                                if opt.id == ans_obj.selected_option_id:
+                                    index = i
+                                    break
+                            if index != -1:
+                                selected_text = f"{chr(65+index)}. {ans_obj.selected_option.text}"
+                            else:
+                                selected_text = ans_obj.selected_option.text
+                        else:
+                            selected_text = ""
+                    
+                    row.append(selected_text)
+                    row.append(ans_obj.points_obtained)
+                else:
+                    # Question not in this attempt
+                    row.append("")
+                    row.append(0)
+            
+            writer.writerow(row)
+            
+        return response
 
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
     def questions(self, request, pk=None):
@@ -37,7 +129,15 @@ class ExamViewSet(viewsets.ModelViewSet):
         
         if not attempt:
             # Smart selection logic:
-            # 1. Get IDs of questions user has EVER answered correctly in a completed attempt
+            
+            # 1. Get IDs of questions user has EVER answered in this exam
+            answered_question_ids = AttemptAnswer.objects.filter(
+                attempt__user=user,
+                attempt__exam=exam,
+                attempt__status='completed'
+            ).values_list('question_id', flat=True).distinct()
+            
+            # 2. Get IDs of questions user has EVER answered CORRECTLY
             correct_question_ids = AttemptAnswer.objects.filter(
                 attempt__user=user,
                 attempt__exam=exam,
@@ -47,23 +147,32 @@ class ExamViewSet(viewsets.ModelViewSet):
             
             all_questions = list(Question.objects.filter(exam=exam))
             
-            # 2. Separate into "pending" (not answered correctly) and "mastered"
-            pending_questions = [q for q in all_questions if q.id not in correct_question_ids]
+            # 3. Categorize questions
+            unseen_questions = [q for q in all_questions if q.id not in answered_question_ids]
+            failed_questions = [q for q in all_questions if q.id in answered_question_ids and q.id not in correct_question_ids]
             mastered_questions = [q for q in all_questions if q.id in correct_question_ids]
             
             num_needed = min(len(all_questions), exam.questions_per_attempt)
+            selected_questions = []
+
+            # Priority 1: Unseen questions
+            if len(unseen_questions) > 0:
+                take = min(len(unseen_questions), num_needed)
+                selected_questions.extend(random.sample(unseen_questions, take))
             
-            if len(pending_questions) >= num_needed:
-                # We have enough new/wrong questions to fill the attempt
-                selected_questions = random.sample(pending_questions, num_needed)
-            elif len(pending_questions) > 0:
-                # Fill what's left with mastered questions
-                num_from_mastered = num_needed - len(pending_questions)
-                selected_questions = pending_questions + random.sample(mastered_questions, num_from_mastered)
-            else:
-                # All questions mastered? Reset and pick random
-                selected_questions = random.sample(all_questions, num_needed)
+            # Priority 2: Failed questions (if still needed)
+            needed_still = num_needed - len(selected_questions)
+            if needed_still > 0 and len(failed_questions) > 0:
+                take = min(len(failed_questions), needed_still)
+                selected_questions.extend(random.sample(failed_questions, take))
             
+            # Priority 3: Mastered questions (to fill the 10, if everything else is exhausted)
+            needed_still = num_needed - len(selected_questions)
+            if needed_still > 0 and len(mastered_questions) > 0:
+                take = min(len(mastered_questions), needed_still)
+                selected_questions.extend(random.sample(mastered_questions, take))
+            
+            # Shuffle the final selection so they don't appear in "priority order"
             random.shuffle(selected_questions)
             
             attempt = Attempt.objects.create(user=user, exam=exam)

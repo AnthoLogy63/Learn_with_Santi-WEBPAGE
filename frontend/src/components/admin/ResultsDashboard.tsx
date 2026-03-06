@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { examService } from "@/api/examService";
-import { Loader2, User as UserIcon, ClipboardList, CheckCircle2, XCircle, ChevronRight, BarChart3, Users, Search, ArrowLeft } from "lucide-react";
+import { Loader2, User as UserIcon, ClipboardList, CheckCircle2, XCircle, ChevronRight, BarChart3, Users, Search, ArrowLeft, Download } from "lucide-react";
 import { toast } from "sonner";
 
 const ResultsDashboard = () => {
@@ -86,6 +86,29 @@ const ResultsDashboard = () => {
         return Object.values(groups);
     };
 
+    const handleExport = async (examId: number, examName: string) => {
+        try {
+            const response = await examService.exportResults(examId);
+            if (response.ok) {
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `resultados_${examName.replace(/\s+/g, "_").toLowerCase()}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                toast.success("Descarga iniciada");
+            } else {
+                toast.error("Error al exportar los datos");
+            }
+        } catch (error) {
+            console.error("Export error:", error);
+            toast.error("Error al conectar con el servidor");
+        }
+    };
+
     if (loading && offset === 0) {
         return (
             <div className="flex flex-col items-center justify-center py-20">
@@ -96,29 +119,29 @@ const ResultsDashboard = () => {
     }
 
     return (
-        <div className="space-y-8 animate-fade-in">
-            <header className="mb-8">
-                <h1 className="text-4xl lg:text-5xl font-extrabold text-white tracking-tight mb-3 drop-shadow-lg">
+        <div className="space-y-6 md:space-y-8 animate-fade-in p-2 md:p-0">
+            <header className="mb-6 md:mb-8">
+                <h1 className="text-3xl md:text-4xl lg:text-5xl font-extrabold text-white tracking-tight mb-2 md:mb-3 drop-shadow-lg">
                     Resultados y Analíticas
                 </h1>
-                <p className="text-lg lg:text-xl text-white/80 max-w-2xl leading-relaxed">
+                <p className="text-base md:text-lg lg:text-xl text-white/80 max-w-2xl leading-relaxed">
                     Monitorea el progreso de los analistas y el rendimiento de las evaluaciones.
                 </p>
             </header>
 
             {/* Tabs */}
-            <div className="flex flex-col md:flex-row gap-4 mb-8">
-                <div className="flex gap-2 p-1.5 bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl w-fit">
+            <div className="flex flex-col gap-4 mb-6 md:mb-8">
+                <div className="flex gap-2 p-1.5 bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl w-full md:w-fit">
                     <button
                         onClick={() => { setActiveTab("person"); setSelectedUser(null); setViewingExamDetail(null); }}
-                        className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-black transition-all ${activeTab === "person" ? "bg-white text-[#001c4d] shadow-lg" : "text-white/60 hover:text-white"}`}
+                        className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 md:px-6 py-2.5 rounded-xl text-xs md:text-sm font-black transition-all ${activeTab === "person" ? "bg-white text-[#001c4d] shadow-lg" : "text-white/60 hover:text-white"}`}
                     >
                         <Users className="h-4 w-4" />
                         PERSONAS
                     </button>
                     <button
                         onClick={() => { setActiveTab("evaluation"); setSelectedExam(null); }}
-                        className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-black transition-all ${activeTab === "evaluation" ? "bg-white text-[#001c4d] shadow-lg" : "text-white/60 hover:text-white"}`}
+                        className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 md:px-6 py-2.5 rounded-xl text-xs md:text-sm font-black transition-all ${activeTab === "evaluation" ? "bg-white text-[#001c4d] shadow-lg" : "text-white/60 hover:text-white"}`}
                     >
                         <BarChart3 className="h-4 w-4" />
                         EVALUACIONES
@@ -126,7 +149,7 @@ const ResultsDashboard = () => {
                 </div>
 
                 {activeTab === "person" && (
-                    <div className="relative flex-1 max-w-md">
+                    <div className="relative w-full max-w-md">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/40" />
                         <input
                             type="text"
@@ -140,15 +163,15 @@ const ResultsDashboard = () => {
             </div>
 
             {/* Content Area */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
 
                 {/* Lateral List */}
                 <div className="lg:col-span-4 space-y-4">
-                    <h2 className="text-xs font-black text-white/40 uppercase tracking-[0.2em] mb-4 ml-2">
+                    <h2 className="text-[10px] md:text-xs font-black text-white/40 uppercase tracking-[0.2em] mb-3 md:mb-4 ml-2">
                         {activeTab === "person" ? "LISTA DE ANALISTAS" : "LISTA DE EXÁMENES"}
                     </h2>
 
-                    <div className="max-h-[600px] overflow-y-auto pr-2 custom-scrollbar space-y-3">
+                    <div className="max-h-[400px] lg:max-h-[600px] overflow-y-auto pr-2 custom-scrollbar space-y-3">
                         {activeTab === "person" ? (
                             <>
                                 {userResults.map((user) => (
@@ -173,7 +196,7 @@ const ResultsDashboard = () => {
                                     <button
                                         onClick={loadMore}
                                         disabled={loadingMore}
-                                        className="w-full py-3 rounded-xl border border-white/10 text-white/40 text-xs font-black uppercase tracking-widest hover:bg-white/5 transition-all disabled:opacity-50"
+                                        className="w-full py-3 rounded-xl border border-white/10 text-white/40 text-[10px] md:text-xs font-black uppercase tracking-widest hover:bg-white/5 transition-all disabled:opacity-50"
                                     >
                                         {loadingMore ? "Cargando..." : "Cargar más analistas"}
                                     </button>
@@ -206,9 +229,9 @@ const ResultsDashboard = () => {
                 <div className="lg:col-span-8">
                     {activeTab === "person" ? (
                         selectedUser ? (
-                            <div className="bg-white rounded-3xl p-8 shadow-2xl text-[#001c4d] min-h-[500px] animate-fade-in border border-white animate-in slide-in-from-right-4 overflow-hidden flex flex-col">
-                                <header className="border-b border-slate-100 pb-6 mb-8 flex justify-between items-start">
-                                    <div className="flex items-center gap-4">
+                            <div className="bg-white rounded-3xl p-5 md:p-8 shadow-2xl text-[#001c4d] min-h-[400px] animate-fade-in border border-white animate-in slide-in-from-right-4 overflow-hidden flex flex-col">
+                                <header className="border-b border-slate-100 pb-5 md:pb-6 mb-6 md:mb-8 flex flex-wrap justify-between items-start gap-4">
+                                    <div className="flex items-center gap-3 md:gap-4">
                                         {viewingExamDetail && (
                                             <button
                                                 onClick={() => setViewingExamDetail(null)}
@@ -218,15 +241,15 @@ const ResultsDashboard = () => {
                                             </button>
                                         )}
                                         <div>
-                                            <h3 className="text-2xl font-black tracking-tight mb-1">@{selectedUser.username}</h3>
-                                            <p className="text-xs font-black text-slate-400 uppercase tracking-widest">
+                                            <h3 className="text-xl md:text-2xl font-black tracking-tight mb-1">@{selectedUser.username}</h3>
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
                                                 {viewingExamDetail ? `Detalle: ${viewingExamDetail.examName}` : "Resumen de Evaluaciones"}
                                             </p>
                                         </div>
                                     </div>
-                                    <div className="bg-[#001c4d] text-white px-5 py-2 rounded-2xl text-center shadow-lg">
-                                        <p className="text-2xl font-black">{selectedUser.total_score}</p>
-                                        <p className="text-[10px] font-black uppercase tracking-widest opacity-60">Pts Totales</p>
+                                    <div className="bg-[#001c4d] text-white px-4 md:px-5 py-2 rounded-2xl text-center shadow-lg">
+                                        <p className="text-xl md:text-2xl font-black">{selectedUser.total_score}</p>
+                                        <p className="text-[9px] md:text-[10px] font-black uppercase tracking-widest opacity-60">Pts Totales</p>
                                     </div>
                                 </header>
 
@@ -238,13 +261,13 @@ const ResultsDashboard = () => {
                                                 <button
                                                     key={group.id}
                                                     onClick={() => setViewingExamDetail({ examId: group.id, examName: group.name })}
-                                                    className="p-6 rounded-2xl bg-slate-50 border border-slate-200 hover:border-slate-400 hover:shadow-md transition-all text-left"
+                                                    className="p-5 md:p-6 rounded-2xl bg-slate-50 border border-slate-200 hover:border-slate-400 hover:shadow-md transition-all text-left"
                                                 >
-                                                    <h4 className="font-black text-lg mb-4 leading-tight">{group.name}</h4>
+                                                    <h4 className="font-black text-base md:text-lg mb-4 leading-tight">{group.name}</h4>
                                                     <div className="flex justify-between items-end">
                                                         <div>
                                                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Mejor Puntaje</p>
-                                                            <p className="text-2xl font-black text-emerald-600">{group.max_score} pts</p>
+                                                            <p className="text-xl md:text-2xl font-black text-emerald-600">{group.max_score} pts</p>
                                                         </div>
                                                         <div className="text-right">
                                                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Intentos</p>
@@ -261,11 +284,11 @@ const ResultsDashboard = () => {
                                         </div>
                                     ) : (
                                         /* Detailed View (Attempts of a specific exam) */
-                                        <div className="space-y-8 animate-in slide-in-from-bottom-4">
+                                        <div className="space-y-6 md:space-y-8 animate-in slide-in-from-bottom-4">
                                             {selectedUser.attempts
                                                 .filter((a: any) => a.exam_id === viewingExamDetail.examId)
                                                 .map((attempt: any, idx: number) => (
-                                                    <div key={idx} className={`bg-slate-50 rounded-2xl p-6 border ${attempt.counts_for_score ? 'border-amber-200' : 'border-slate-200'}`}>
+                                                    <div key={idx} className={`bg-slate-50 rounded-2xl p-5 md:p-6 border ${attempt.counts_for_score ? 'border-amber-200' : 'border-slate-200'}`}>
                                                         <div className="flex justify-between items-center mb-6">
                                                             <div>
                                                                 <h4 className="font-black text-lg">Intento {attempt.attempt_number}</h4>
@@ -276,18 +299,18 @@ const ResultsDashboard = () => {
                                                                     {attempt.counts_for_score && <span className="text-[9px] font-black uppercase tracking-widest bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Puntuable</span>}
                                                                 </div>
                                                             </div>
-                                                            <span className="text-xl font-black text-emerald-600 bg-emerald-50 px-4 py-1 rounded-xl border border-emerald-100">{attempt.score} pts</span>
+                                                            <span className="text-lg md:text-xl font-black text-emerald-600 bg-emerald-50 px-3 md:px-4 py-1 rounded-xl border border-emerald-100">{attempt.score} pts</span>
                                                         </div>
 
-                                                        <div className="space-y-4">
+                                                        <div className="space-y-3 md:space-y-4">
                                                             {attempt.answers.map((ans: any, aIdx: number) => (
-                                                                <div key={aIdx} className="flex gap-4 items-start p-4 rounded-xl bg-white border border-slate-100">
+                                                                <div key={aIdx} className="flex gap-3 md:gap-4 items-start p-3 md:p-4 rounded-xl bg-white border border-slate-100">
                                                                     <div className={`mt-1 h-6 w-6 rounded-full flex items-center justify-center flex-shrink-0 ${ans.is_correct ? "bg-emerald-100 text-emerald-600" : "bg-red-100 text-red-600"}`}>
                                                                         {ans.is_correct ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
                                                                     </div>
                                                                     <div className="flex-1">
                                                                         <p className="text-sm font-bold leading-snug mb-2">{ans.question}</p>
-                                                                        <p className="text-xs font-black uppercase tracking-widest">
+                                                                        <p className="text-[10px] md:text-xs font-black uppercase tracking-widest">
                                                                             <span className="text-slate-400">Respuesta:</span>{" "}
                                                                             <span className={ans.is_correct ? "text-emerald-600" : "text-red-500"}>{ans.selected}</span>
                                                                         </p>
@@ -302,26 +325,36 @@ const ResultsDashboard = () => {
                                 </div>
                             </div>
                         ) : (
-                            <div className="h-full flex items-center justify-center p-20 bg-white/5 rounded-3xl border border-dashed border-white/20">
-                                <p className="text-white/40 font-bold uppercase tracking-widest">Selecciona un analista para ver sus detalles</p>
+                            <div className="h-full min-h-[300px] flex items-center justify-center p-10 md:p-20 bg-white/5 rounded-3xl border border-dashed border-white/20">
+                                <p className="text-white/40 font-bold text-center uppercase tracking-widest text-xs md:text-sm">Selecciona un analista para ver sus detalles</p>
                             </div>
                         )
                     ) : (
                         selectedExam ? (
-                            <div className="bg-white rounded-3xl p-8 shadow-2xl text-[#001c4d] min-h-[500px] animate-fade-in border border-white animate-in slide-in-from-right-4 flex flex-col">
-                                <header className="border-b border-slate-100 pb-6 mb-8 flex justify-between items-start">
-                                    <div>
-                                        <h3 className="text-2xl font-black tracking-tight mb-1">{selectedExam.name}</h3>
-                                        <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Resumen de Rendimiento General</p>
-                                    </div>
-                                    <div className="flex gap-4">
-                                        <div className="bg-[#001c4d] text-white px-5 py-2 rounded-2xl text-center shadow-lg">
-                                            <p className="text-2xl font-black">{selectedExam.total_attempts}</p>
-                                            <p className="text-[10px] font-black uppercase tracking-widest opacity-60">Muestra</p>
+                            <div className="bg-white rounded-3xl p-5 md:p-8 shadow-2xl text-[#001c4d] min-h-[400px] animate-fade-in border border-white animate-in slide-in-from-right-4 flex flex-col">
+                                <header className="border-b border-slate-100 pb-5 md:pb-6 mb-6 md:mb-8 flex flex-col gap-6">
+                                    <div className="flex flex-wrap justify-between items-start gap-4">
+                                        <div>
+                                            <h3 className="text-xl md:text-2xl font-black tracking-tight mb-1">{selectedExam.name}</h3>
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Resumen de Rendimiento General</p>
                                         </div>
-                                        <div className="bg-amber-500 text-white px-5 py-2 rounded-2xl text-center shadow-lg">
-                                            <p className="text-2xl font-black">{selectedExam.avg_score}%</p>
-                                            <p className="text-[10px] font-black uppercase tracking-widest opacity-60">Promedio</p>
+                                        <button
+                                            onClick={() => handleExport(selectedExam.id, selectedExam.name)}
+                                            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl shadow-lg transition-all"
+                                        >
+                                            <Download size={16} />
+                                            Exportar Resultados (CSV)
+                                        </button>
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-4">
+                                        <div className="flex-1 min-w-[120px] bg-slate-50 border border-slate-100 p-4 rounded-2xl text-center">
+                                            <p className="text-xl md:text-2xl font-black">{selectedExam.total_attempts}</p>
+                                            <p className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-400">Analistas</p>
+                                        </div>
+                                        <div className="flex-1 min-w-[120px] bg-amber-50 border border-amber-100 p-4 rounded-2xl text-center">
+                                            <p className="text-xl md:text-2xl font-black text-amber-600">{selectedExam.avg_score}%</p>
+                                            <p className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-amber-500">Promedio</p>
                                         </div>
                                     </div>
                                 </header>

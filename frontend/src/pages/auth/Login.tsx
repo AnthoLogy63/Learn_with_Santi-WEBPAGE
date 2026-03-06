@@ -51,10 +51,10 @@ const Login = () => {
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
 
       {/* CONTENEDOR CENTRAL */}
-      <div className="relative z-10 flex animate-fade-in">
+      <div className="relative z-10 flex flex-col lg:flex-row animate-fade-in w-full max-w-4xl lg:w-auto">
 
         {/* CARTILLA LOGIN */}
-        <div className="w-[380px] h-[480px] bg-white/10 backdrop-blur-xl border border-white/20 rounded-l-3xl p-8 shadow-2xl flex flex-col justify-center">
+        <div className="w-full lg:w-[380px] min-h-[480px] bg-white/10 backdrop-blur-xl border border-white/20 rounded-t-3xl lg:rounded-l-3xl lg:rounded-tr-none p-8 shadow-2xl flex flex-col justify-center">
 
           <div className="text-center mb-4">
             <div className="inline-flex items-center justify-center p-2 bg-white rounded-2xl mb-6 shadow-lg">
@@ -128,8 +128,8 @@ const Login = () => {
           </form>
         </div>
 
-        <div className="h-[480px] bg-white rounded-r-3xl shadow-2xl flex items-center justify-center overflow-hidden">
-          <div className="relative h-[480px] w-[410px] rounded-r-3xl overflow-hidden">
+        <div className="h-[300px] lg:h-[480px] bg-white rounded-b-3xl lg:rounded-r-3xl lg:rounded-bl-none shadow-2xl flex items-center justify-center overflow-hidden">
+          <div className="relative h-full w-full lg:w-[410px] overflow-hidden">
 
             <img
               src={Santigif}
@@ -141,7 +141,7 @@ const Login = () => {
               <img
                 src={LogoCaja}
                 alt="Logo Caja"
-                className="h-[70px] w-[70px] object-contain"
+                className="h-[50px] w-[50px] lg:h-[70px] lg:w-[70px] object-contain"
               />
             </div>
 

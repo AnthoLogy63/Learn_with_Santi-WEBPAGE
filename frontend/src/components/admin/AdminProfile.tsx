@@ -21,10 +21,10 @@ const AdminProfile = ({ activeTab, setActiveTab }: AdminProfileProps) => {
     ];
 
     return (
-        <div className="animate-slide-in">
+        <div className="animate-slide-in flex flex-col h-full">
             {/* Avatar */}
-            <div className="flex flex-col items-center text-center mb-10">
-                <div className="w-24 h-24 rounded-full bg-slate-200 border-2 border-white text-[#001c4d] flex items-center justify-center text-3xl font-bold mb-4 relative overflow-hidden shadow-xl">
+            <div className="flex flex-col items-center text-center mb-6">
+                <div className="w-20 h-20 rounded-full bg-slate-200 border-2 border-white text-[#001c4d] flex items-center justify-center text-2xl font-bold mb-3 relative overflow-hidden shadow-xl">
                     {user.current_rank?.badge_image ? (
                         <img
                             src={user.current_rank.badge_image}
@@ -46,20 +46,20 @@ const AdminProfile = ({ activeTab, setActiveTab }: AdminProfileProps) => {
                     <span className="text-[10px] font-black text-white uppercase tracking-widest">Administrador</span>
                 </div>
 
-                <h3 className="text-xl font-bold text-slate-900 tracking-tight">
+                <h3 className="text-base font-bold text-slate-900 tracking-tight">
                     @{user.username}
                 </h3>
             </div>
 
             {/* Admin Navigation */}
-            <div className="space-y-4 mb-10">
+            <div className="space-y-2 mb-6">
                 {navItems.map((item) => (
                     <button
                         key={item.id}
                         onClick={() => !item.placeholder && setActiveTab(item.id)}
-                        className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl border transition-all duration-300 group shadow-sm ${activeTab === item.id
-                                ? "bg-[#001c4d] border-[#001c4d] text-white"
-                                : "bg-white border-slate-200 text-slate-600 hover:border-[#001c4d]/20 hover:bg-slate-50"
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl border transition-all duration-300 group shadow-sm ${activeTab === item.id
+                            ? "bg-[#001c4d] border-[#001c4d] text-white"
+                            : "bg-white border-slate-200 text-slate-600 hover:border-[#001c4d]/20 hover:bg-slate-50"
                             } ${item.placeholder ? "opacity-60 cursor-not-allowed" : ""}`}
                         disabled={item.placeholder}
                     >
@@ -75,7 +75,7 @@ const AdminProfile = ({ activeTab, setActiveTab }: AdminProfileProps) => {
             {/* Logout */}
             <button
                 onClick={logout}
-                className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border-2 border-red-400 bg-white text-sm font-bold text-red-500 hover:bg-red-50 hover:text-red-600 hover:border-red-500 transition-all duration-300 shadow-sm mt-10"
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-red-400 bg-white text-sm font-bold text-red-500 hover:bg-red-50 hover:text-red-600 hover:border-red-500 transition-all duration-300 shadow-sm mt-4"
             >
                 <LogOut className="h-4 w-4 text-red-500" />
                 Cerrar sesión
