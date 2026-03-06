@@ -1,13 +1,16 @@
 import FondoCaja from "@/media/FondoCaja.webp";
+import SantiGif from "@/media/santi.gif";
+import SantiWebp from "@/media/santi.webp";
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAppContext } from "@/context/AppContext";
 import { examService } from "@/api/examService";
-import { ArrowLeft, ArrowRight, CheckCircle2, RotateCcw, Loader2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, RotateCcw, Loader2, Play } from "lucide-react";
 
 interface Option {
   id: number;
   text: string;
+  is_correct: boolean;
 }
 
 interface Question {
@@ -33,6 +36,13 @@ const ExamPage = () => {
   const [showResults, setShowResults] = useState(false);
   const [results, setResults] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+
+  // Quiz Mode States
+  const [feedbackStatus, setFeedbackStatus] = useState<'answering' | 'checked'>('answering');
+  const [streakCorrect, setStreakCorrect] = useState(0);
+  const [streakWrong, setStreakWrong] = useState(0);
+  const [activeMeme, setActiveMeme] = useState<{ type: 'happy' | 'sad'; count: number } | null>(null);
+  const [isAutoAdvancing, setIsAutoAdvancing] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -79,8 +89,11 @@ const ExamPage = () => {
   }
 
   const currentQuestion = questions[currentIndex];
+  const isOpinionQuest = (currentQuestion.question_type === 'single_choice' || currentQuestion.question_type === 'multiple_choice') &&
+    !currentQuestion.options.some(o => o.is_correct);
 
   const handleAnswer = (val: any) => {
+    if (feedbackStatus === 'checked' || isAutoAdvancing) return;
     if (currentQuestion.question_type === 'multiple_choice') {
       const current = (answers[currentQuestion.id] || []) as number[];
       if (current.includes(val)) {
@@ -91,6 +104,75 @@ const ExamPage = () => {
     } else {
       setAnswers((prev) => ({ ...prev, [currentQuestion.id]: val }));
     }
+  };
+
+  const handleContinue = () => {
+    if (isAutoAdvancing) return;
+
+    const selected = answers[currentQuestion.id];
+
+    const hasValue = currentQuestion.question_type === 'multiple_choice'
+      ? (selected || []).length > 0
+      : (selected !== undefined && selected !== "");
+
+    if (!hasValue) {
+      alert("No puedes pasar a la siguiente pregunta sin antes haber seleccionado alguna opción.");
+      return;
+    }
+
+    setIsAutoAdvancing(true);
+
+    // Calculate correctness
+    let isCorrect = false;
+    const isOpinionQuest = (currentQuestion.question_type === 'single_choice' || currentQuestion.question_type === 'multiple_choice') &&
+      !currentQuestion.options.some(o => o.is_correct);
+
+    if (isOpinionQuest) {
+      isCorrect = true;
+    } else if (currentQuestion.question_type === 'single_choice') {
+      isCorrect = currentQuestion.options.find(o => o.id === selected)?.is_correct || false;
+    } else if (currentQuestion.question_type === 'multiple_choice') {
+      const selectedIds = selected as number[];
+      const correctIds = currentQuestion.options.filter(o => o.is_correct).map(o => o.id);
+      isCorrect = selectedIds.length === correctIds.length && selectedIds.every(id => correctIds.includes(id));
+    } else if (currentQuestion.question_type === 'open_ended') {
+      isCorrect = (selected as string).trim().length > 0;
+    }
+
+    // Update streaks
+    let memeToSet: any = null;
+    if (isCorrect) {
+      const nextCorrect = streakCorrect + 1;
+      setStreakCorrect(nextCorrect);
+      setStreakWrong(0);
+      if (nextCorrect > 0 && nextCorrect % 3 === 0) {
+        memeToSet = { type: 'happy', count: nextCorrect };
+      }
+    } else {
+      const nextWrong = streakWrong + 1;
+      setStreakWrong(nextWrong);
+      setStreakCorrect(0);
+      if (nextWrong > 0 && nextWrong % 2 === 0) {
+        memeToSet = { type: 'sad', count: nextWrong };
+      }
+    }
+
+    setFeedbackStatus('checked');
+
+    // Auto-advance after 2 seconds
+    setTimeout(() => {
+      if (memeToSet) {
+        setActiveMeme(memeToSet);
+      }
+
+      if (currentIndex < questions.length - 1) {
+        setFeedbackStatus('answering');
+        setCurrentIndex(currentIndex + 1);
+        setIsAutoAdvancing(false);
+      } else {
+        handleFinish();
+      }
+    }, 2000);
   };
 
   const handleFinish = async () => {
@@ -119,10 +201,8 @@ const ExamPage = () => {
         const data = await response.json();
         setResults(data);
         setShowResults(true);
-        fetchUserScore(); // Update points in context
+        fetchUserScore();
       } else {
-        const errorData = await response.json().catch(() => ({}));
-        console.error("Submission failed:", errorData);
         alert("Error al finalizar la evaluación. Por favor intente de nuevo.");
       }
     } catch (error) {
@@ -176,16 +256,10 @@ const ExamPage = () => {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4">
-            <button
-              onClick={() => navigate("/dashboard")}
-              className="flex-1 py-4 rounded-xl border border-white/10 text-sm font-bold text-white hover:bg-white/10 transition-colors"
-            >
+            <button onClick={() => navigate("/dashboard")} className="flex-1 py-4 rounded-xl border border-white/10 text-sm font-bold text-white hover:bg-white/10 transition-colors">
               Cerrar
             </button>
-            <button
-              onClick={() => window.location.reload()}
-              className="flex-1 flex items-center justify-center gap-2 py-4 rounded-xl bg-white text-[#001c4d] text-sm font-bold hover:bg-white/90 transition-all shadow-lg active:scale-95"
-            >
+            <button onClick={() => window.location.reload()} className="flex-1 flex items-center justify-center gap-2 py-4 rounded-xl bg-white text-[#001c4d] text-sm font-bold hover:bg-white/90 transition-all shadow-lg active:scale-95">
               <RotateCcw className="h-4 w-4" />
               Nuevo intento
             </button>
@@ -195,28 +269,63 @@ const ExamPage = () => {
     );
   }
 
-  const allAnswered = questions.every((q) => answers[q.id] !== undefined);
+  if (activeMeme) {
+    return (
+      <div className="h-screen w-screen bg-[#001c4d] flex items-center justify-center p-4 fixed inset-0 z-[100] overflow-hidden"
+        style={{ backgroundImage: `url(${FondoCaja})`, backgroundSize: "cover", backgroundPosition: "center" }}>
+        <div className="absolute inset-0 bg-black/90 backdrop-blur-xl" />
+        <div className="relative z-10 max-w-sm w-full flex flex-col items-center max-h-[95vh]">
+          <div className={`inline-block px-6 py-2 rounded-full mb-6 font-black uppercase tracking-[0.3em] text-xs ${activeMeme.type === 'happy' ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'}`}>
+            {activeMeme.type === 'happy' ? '¡Tarjeta Feliz!' : '¡Tarjeta Triste!'}
+          </div>
+
+          <div className="relative mb-8 w-full flex justify-center">
+            <img src={SantiGif} alt="Santi" className="max-w-[260px] w-full h-auto rounded-3xl shadow-[0_0_50px_rgba(251,191,36,0.2)] border-2 border-white/20" />
+            <div className="absolute -bottom-4 bg-white text-[#001c4d] px-6 py-2 rounded-xl shadow-2xl scale-90">
+              <p className="text-[8px] font-black uppercase tracking-widest opacity-40">RACHA</p>
+              <p className="text-2xl font-black">x{activeMeme.count}</p>
+            </div>
+          </div>
+
+          <h3 className="text-xl font-bold text-white mb-8 px-4">
+            {activeMeme.type === 'happy'
+              ? '¡Santi está muy orgulloso de ti! Vas por buen camino.'
+              : 'Santi sabe que puedes hacerlo mejor. ¡No te rindas!'}
+          </h3>
+
+          <button
+            onClick={() => setActiveMeme(null)}
+            className="w-full bg-[#09B3B3] text-white py-4 rounded-2xl font-black text-base shadow-xl hover:bg-[#079191] active:scale-95 transition-all flex items-center justify-center gap-2"
+          >
+            <Play className="h-5 w-5 fill-current" />
+            CONTINUAR
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#001c4d] text-white flex flex-col relative overflow-hidden"
       style={{ backgroundImage: `url(${FondoCaja})`, backgroundSize: "cover", backgroundPosition: "center" }}>
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
 
-      {/* Header */}
       <header className="border-b border-white/10 bg-white/5 backdrop-blur-xl relative z-10">
         <div className="max-w-4xl mx-auto px-6 h-16 flex items-center justify-between">
           <button onClick={() => navigate("/dashboard")} className="flex items-center gap-2 text-sm font-bold text-white/60 hover:text-white transition-colors">
             <ArrowLeft className="h-4 w-4" />
             Salir
           </button>
-          <span className="text-sm font-black uppercase tracking-widest">Evaluación en curso</span>
+          <div className="flex gap-4">
+            <span className="text-sm font-black uppercase tracking-widest text-emerald-400">+{streakCorrect}</span>
+            <span className="text-sm font-black uppercase tracking-widest text-red-500">-{streakWrong}</span>
+          </div>
           <span className="text-xs font-bold text-white/40 bg-white/5 px-3 py-1 rounded-full border border-white/10">
             {currentIndex + 1} / {questions.length}
           </span>
         </div>
       </header>
 
-      {/* Progress */}
       <div className="max-w-4xl mx-auto w-full px-6 pt-6 relative z-10">
         <div className="h-1.5 bg-white/10 rounded-full overflow-hidden shadow-inner">
           <div
@@ -226,22 +335,32 @@ const ExamPage = () => {
         </div>
       </div>
 
-      {/* Question */}
       <div className="max-w-4xl mx-auto w-full px-6 py-12 flex-1 relative z-10">
         <div className="animate-fade-in" key={currentQuestion.id}>
-          <span className="inline-block text-[10px] font-black text-amber-400 uppercase tracking-[0.2em] mb-4">
-            Pregunta {currentIndex + 1}
-          </span>
-          <h2 className="text-2xl lg:text-3xl font-bold text-white mb-10 leading-snug">
-            {currentQuestion.text}
-          </h2>
+          <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
+            <div>
+              <span className="inline-block text-[10px] font-black text-amber-400 uppercase tracking-[0.2em] mb-2">
+                Pregunta {currentIndex + 1}
+              </span>
+              <h2 className="text-2xl lg:text-3xl font-bold text-white leading-snug">
+                {currentQuestion.text}
+              </h2>
+            </div>
+            {currentQuestion.question_type === 'multiple_choice' && (
+              <span className="flex-shrink-0 px-4 py-1.5 rounded-full bg-amber-400/10 border border-amber-400/30 text-amber-400 text-[10px] font-black uppercase tracking-widest">
+                Selección Múltiple
+              </span>
+            )}
+          </div>
 
           {currentQuestion.question_type === 'open_ended' ? (
             <textarea
               value={answers[currentQuestion.id] || ""}
               onChange={(e) => handleAnswer(e.target.value)}
+              disabled={feedbackStatus === 'checked' || isAutoAdvancing}
               placeholder="Escribe tu respuesta aquí..."
-              className="w-full h-40 p-6 rounded-2xl bg-white/5 border border-white/10 text-white focus:border-amber-400 focus:outline-none transition-all placeholder:text-white/20 font-medium"
+              className={`w-full h-40 p-6 rounded-2xl bg-white/5 border text-white focus:border-amber-400 focus:outline-none transition-all placeholder:text-white/20 font-medium ${feedbackStatus === 'checked' ? 'border-emerald-500 bg-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.1)]' : 'border-white/10'
+                }`}
             />
           ) : (
             <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2">
@@ -251,21 +370,42 @@ const ExamPage = () => {
                   ? (answers[currentQuestion.id] || []).includes(option.id)
                   : answers[currentQuestion.id] === option.id;
 
+                const isMultiple = currentQuestion.question_type === 'multiple_choice';
+
+                let containerStyle = "border-white/10 bg-white/5 text-white/80 hover:bg-white/10 hover:border-white/20";
+                if (feedbackStatus === 'checked') {
+                  const isCorrectView = option.is_correct || (isOpinionQuest && isSelected);
+                  const isWrongView = isSelected && !option.is_correct && !isOpinionQuest;
+
+                  if (isCorrectView) {
+                    containerStyle = "border-emerald-500 bg-emerald-500/20 text-white shadow-[0_0_20px_rgba(16,185,129,0.2)]";
+                  } else if (isWrongView) {
+                    containerStyle = "border-red-500 bg-red-500/20 text-white shadow-[0_0_20px_rgba(239,68,68,0.1)]";
+                  } else {
+                    containerStyle = "border-white/5 bg-white/5 text-white/20 opacity-40";
+                  }
+                } else if (isSelected) {
+                  containerStyle = "border-amber-400 bg-amber-400/20 text-white shadow-lg ring-1 ring-amber-400/50";
+                }
+
                 return (
                   <button
                     key={option.id}
                     onClick={() => handleAnswer(option.id)}
-                    className={`group w-full text-left p-6 rounded-2xl border transition-all duration-300 ${isSelected
-                      ? "border-amber-400 bg-amber-400/20 text-white shadow-lg ring-1 ring-amber-400/50"
-                      : "border-white/10 bg-white/5 text-white/80 hover:bg-white/10 hover:border-white/20"
-                      }`}
+                    disabled={feedbackStatus === 'checked'}
+                    className={`group w-full text-left p-6 rounded-2xl border transition-all duration-300 ${containerStyle} ${feedbackStatus === 'checked' ? 'cursor-default' : ''}`}
                   >
                     <div className="flex items-center gap-4">
-                      <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-sm font-black transition-colors ${isSelected ? "bg-amber-400 text-black shadow-[0_0_15px_rgba(251,191,36,0.5)]" : "bg-white/10 text-white"
+                      <div className={`flex-shrink-0 w-8 h-8 flex items-center justify-center text-sm font-black transition-all duration-300 ${isMultiple ? "rounded-lg" : "rounded-full"
+                        } ${isSelected
+                          ? (feedbackStatus === 'checked' && !option.is_correct && !isOpinionQuest ? "bg-red-500 text-white" : "bg-amber-400 text-black shadow-[0_0_15px_rgba(251,191,36,0.5)]")
+                          : (feedbackStatus === 'checked' && (option.is_correct || (isOpinionQuest && isSelected)) ? "bg-emerald-500 text-white" : "bg-white/10 text-white border border-white/10")
                         }`}>
-                        {currentQuestion.question_type === 'multiple_choice' && isSelected ? "✓" : letter}
+                        {isMultiple ? (isSelected || (feedbackStatus === 'checked' && (option.is_correct || (isOpinionQuest && isSelected))) ? "✓" : "") : letter}
                       </div>
-                      <span className="text-base font-bold leading-tight group-hover:text-white transition-colors">{option.text}</span>
+                      <span className="text-base font-bold leading-tight group-hover:text-white transition-colors">
+                        {option.text}
+                      </span>
                     </div>
                   </button>
                 );
@@ -274,35 +414,27 @@ const ExamPage = () => {
           )}
         </div>
 
-        {/* Navigation */}
-        <div className="flex items-center justify-between mt-16 border-t border-white/10 pt-8">
+        <div className="flex items-center justify-center mt-12 border-t border-white/10 pt-8">
           <button
-            onClick={() => setCurrentIndex((i) => Math.max(0, i - 1))}
-            disabled={currentIndex === 0}
-            className="flex items-center gap-2 px-6 py-3 rounded-xl border border-white/10 text-sm font-bold text-white hover:bg-white/10 transition-colors disabled:opacity-20 disabled:cursor-not-allowed"
+            onClick={handleContinue}
+            disabled={isAutoAdvancing}
+            className={`w-full max-w-sm py-4 rounded-xl text-lg font-black transition-all shadow-xl active:scale-95 flex items-center justify-center gap-3 ${isAutoAdvancing
+              ? 'bg-white/10 text-white/40 cursor-wait'
+              : (feedbackStatus === 'answering' ? 'bg-white text-[#001c4d] hover:bg-white/90' : 'bg-[#09B3B3] text-white')
+              }`}
           >
-            <ArrowLeft className="h-4 w-4" />
-            Anterior
+            {isAutoAdvancing ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin" />
+                Verificando...
+              </>
+            ) : (
+              <>
+                {currentIndex < questions.length - 1 ? 'Continuar' : 'Finalizar y ver resultados'}
+                <ArrowRight className="h-5 w-5" />
+              </>
+            )}
           </button>
-
-          {currentIndex < questions.length - 1 ? (
-            <button
-              onClick={() => setCurrentIndex((i) => i + 1)}
-              className="flex items-center gap-2 px-8 py-3 rounded-xl bg-white text-[#001c4d] text-sm font-black hover:bg-white/90 transition-all shadow-lg active:scale-95"
-            >
-              Siguiente
-              <ArrowRight className="h-4 w-4" />
-            </button>
-          ) : (
-            <button
-              onClick={handleFinish}
-              disabled={!allAnswered || isSubmitting}
-              className="px-10 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-sm font-black hover:opacity-90 transition-all shadow-lg active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
-              Finalizar evaluación
-            </button>
-          )}
         </div>
       </div>
     </div>

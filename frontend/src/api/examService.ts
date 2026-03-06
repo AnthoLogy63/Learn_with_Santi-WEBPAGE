@@ -37,7 +37,7 @@ export const examService = {
         });
     },
 
-    getUserResults: async () => {
-        return apiClient("/exams/attempts/user_results/");
+    getUserResults: async (search: string = "", offset: number = 0) => {
+        return apiClient(`/exams/attempts/user_results/?search=${search}&offset=${offset}`);
     },
 };

@@ -54,7 +54,7 @@ const Login = () => {
       <div className="relative z-10 flex animate-fade-in">
 
         {/* CARTILLA LOGIN */}
-        <div className="w-[380px] bg-white/10 backdrop-blur-xl border border-white/20 rounded-l-3xl p-8 shadow-2xl">
+        <div className="w-[380px] h-[480px] bg-white/10 backdrop-blur-xl border border-white/20 rounded-l-3xl p-8 shadow-2xl flex flex-col justify-center">
 
           <div className="text-center mb-4">
             <div className="inline-flex items-center justify-center p-2 bg-white rounded-2xl mb-6 shadow-lg">
@@ -69,19 +69,19 @@ const Login = () => {
             </h2>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-7">
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-bold text-white/80 mb-1.5 ml-1">
                 Usuario
               </label>
               <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/40" />
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-amber-400" />
                 <input
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="Ingrese su usuario"
-                  className="w-full pl-5 pr-4 py-3 rounded-xl border border-white/10 text-white text-sm placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-amber-400/50 transition-all"
+                  className="w-full pl-10 pr-4 py-3 rounded-xl border border-white/10 bg-black/20 text-white text-sm placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-amber-400/50 transition-all font-medium"
                 />
               </div>
             </div>
@@ -91,27 +91,30 @@ const Login = () => {
                 DNI (Contraseña)
               </label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/40" />
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-amber-400" />
                 <input
                   type="password"
                   value={dni}
                   onChange={(e) => setDni(e.target.value)}
                   placeholder="Ingrese su DNI"
-                  className="w-full pl-5 pr-4 py-3 rounded-xl border border-white/10 text-white text-sm placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-amber-400/50 transition-all"
+                  className="w-full pl-10 pr-4 py-3 rounded-xl border border-white/10 bg-black/20 text-white text-sm placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-amber-400/50 transition-all font-medium"
                 />
               </div>
-            </div>
 
-            {error && (
-              <p className="text-sm text-red-400 font-bold text-center">
-                {error}
-              </p>
-            )}
+              {/* Error pegadito al input */}
+              <div className="h-3 mt-1 flex items-center justify-center">
+                {error && (
+                  <p className="text-[10px] text-red-400 font-bold text-center animate-shake">
+                    {error}
+                  </p>
+                )}
+              </div>
+            </div>
 
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3.5 mt-4 rounded-xl 
+              className="w-full py-3.5 rounded-xl 
                       bg-[#09B3B3] text-white font-black text-sm
                       shadow-lg
                       hover:bg-[#0ac2c2]
@@ -127,7 +130,7 @@ const Login = () => {
 
         <div className="h-[480px] bg-white rounded-r-3xl shadow-2xl flex items-center justify-center overflow-hidden">
           <div className="relative h-[480px] w-[410px] rounded-r-3xl overflow-hidden">
-            
+
             <img
               src={Santigif}
               alt="Santi"

@@ -91,10 +91,9 @@ class ExamViewSet(viewsets.ModelViewSet):
         exams = Exam.objects.all()
         stats = []
         for exam in exams:
-            # Group by analyst, taking their BEST attempt of the first 3
-            analysts = UserModel.objects.filter(attempts__exam=exam).distinct()
+            # Group by analyst, taking their BEST attempt
+            analysts = UserModel.objects.filter(is_staff=False)
             best_scores = []
-            
             for analyst in analysts:
                 best_q_attempt = Attempt.objects.filter(
                     user=analyst, 
@@ -112,30 +111,47 @@ class ExamViewSet(viewsets.ModelViewSet):
             questions = Question.objects.filter(exam=exam)
             q_stats = []
             
-            # For each question, how many times was it answered correctly in a BEST qualifying attempt?
+            # Find all "best qualifying attempts" IDs for this exam
+            best_attempt_ids = []
+            for analyst in analysts:
+                at = Attempt.objects.filter(user=analyst, exam=exam, status='completed', counts_for_score=True).order_by('-score_obtained').first()
+                if at: best_attempt_ids.append(at.id)
+
             for q in questions:
-                # Find all "best qualifying attempts" for this exam
-                best_attempt_ids = []
-                for analyst in analysts:
-                    at = Attempt.objects.filter(user=analyst, exam=exam, status='completed', counts_for_score=True).order_by('-score_obtained').first()
-                    if at: best_attempt_ids.append(at.id)
-                
                 relevant_answers = AttemptAnswer.objects.filter(question=q, attempt_id__in=best_attempt_ids)
                 total_q = relevant_answers.count()
                 correct_q = relevant_answers.filter(is_correct=True).count()
                 
+                # Choice distribution (like Google Forms)
+                choices = []
+                for opt in q.options.all():
+                    # Count how many times this specific option was selected in these best attempts
+                    if q.question_type == 'multiple_choice':
+                        count = relevant_answers.filter(selected_options=opt).count()
+                    else:
+                        count = relevant_answers.filter(selected_option=opt).count()
+                    
+                    choices.append({
+                        'text': opt.text,
+                        'is_correct': opt.is_correct,
+                        'count': count,
+                        'percent': round((count / total_q * 100) if total_q > 0 else 0)
+                    })
+
                 q_stats.append({
                     'id': q.id,
                     'text': q.text,
+                    'type': q.question_type,
                     'total': total_q,
                     'correct': correct_q,
-                    'percent': round((correct_q / total_q * 100) if total_q > 0 else 0)
+                    'percent': round((correct_q / total_q * 100) if total_q > 0 else 0),
+                    'choices': choices
                 })
 
             stats.append({
                 'id': exam.id,
                 'name': exam.name,
-                'total_attempts': total_analysts, # Reusing label for analysts count
+                'total_attempts': total_analysts, 
                 'avg_score': round(avg_score),
                 'question_stats': q_stats
             })
@@ -159,11 +175,20 @@ class AttemptViewSet(viewsets.ModelViewSet):
         
         from django.contrib.auth import get_user_model
         UserModel = get_user_model()
+        
+        search_query = request.query_params.get('search', '')
+        offset = int(request.query_params.get('offset', 0))
+        limit = 10
+        
         analysts = UserModel.objects.filter(is_staff=False)
+        if search_query:
+            analysts = analysts.filter(username__icontains=search_query)
+            
+        total_count = analysts.count()
+        analysts_page = analysts.order_by('username')[offset:offset+limit]
         
         results = []
-        for user in analysts:
-            # All attempts for the user
+        for user in analysts_page:
             user_attempts = Attempt.objects.filter(user=user, status='completed').order_by('-completed_at')
             attempts_data = []
             
@@ -171,13 +196,23 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 answers = AttemptAnswer.objects.filter(attempt=attempt)
                 ans_data = []
                 for a in answers:
+                    selected_text = "N/A"
+                    if a.question.question_type == 'multiple_choice':
+                        selected_text = ", ".join([o.text for o in a.selected_options.all()])
+                    elif a.question.question_type == 'open_ended':
+                        selected_text = a.text_response or ""
+                    else:
+                        selected_text = a.selected_option.text if a.selected_option else "N/A"
+
                     ans_data.append({
                         'question': a.question.text,
-                        'selected': a.selected_option.text if a.selected_option else "N/A",
+                        'selected': selected_text,
                         'is_correct': a.is_correct
                     })
                 
                 attempts_data.append({
+                    'id': attempt.id,
+                    'exam_id': attempt.exam.id,
                     'exam_name': attempt.exam.name,
                     'score': attempt.score_obtained,
                     'date': attempt.completed_at,
@@ -193,7 +228,11 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 'attempts': attempts_data
             })
             
-        return Response(results)
+        return Response({
+            'results': results,
+            'total': total_count,
+            'has_more': (offset + limit) < total_count
+        })
 
     @action(detail=True, methods=['post'])
     def submit_answers(self, request, pk=None):
