@@ -1,4 +1,4 @@
-import { apiClient, getAuthHeader } from "./apiClient";
+import { apiClient, getAuthHeader, API_URL } from "./apiClient";
 
 export interface Exam {
     id: number;
@@ -86,7 +86,7 @@ export const examService = {
     // CRUD Questions
     createQuestion: async (examId: number, formData: FormData) => {
         // We use FormData for image upload
-        return fetch(`${import.meta.env.VITE_API_URL}/exams/questions/?exam_id=${examId}`, {
+        return fetch(`${API_URL}/exams/questions/?exam_id=${examId}`, {
             method: 'POST',
             headers: { ...getAuthHeader() },
             body: formData,
@@ -94,7 +94,7 @@ export const examService = {
     },
 
     updateQuestion: async (questionId: number, formData: FormData) => {
-        return fetch(`${import.meta.env.VITE_API_URL}/exams/questions/${questionId}/`, {
+        return fetch(`${API_URL}/exams/questions/${questionId}/`, {
             method: 'PATCH',
             headers: { ...getAuthHeader() },
             body: formData,
@@ -149,7 +149,7 @@ export const examService = {
     importExam: async (file: File) => {
         const form = new FormData();
         form.append('file', file);
-        return fetch(`${import.meta.env.VITE_API_URL}/exams/import/`, {
+        return fetch(`${API_URL}/exams/import/`, {
             method: 'POST',
             headers: { ...getAuthHeader() },
             body: form,
@@ -157,7 +157,7 @@ export const examService = {
     },
 
     syncExam: async (examId: number, formData: FormData) => {
-        return fetch(`${import.meta.env.VITE_API_URL}/exams/${examId}/sync/`, {
+        return fetch(`${API_URL}/exams/${examId}/sync/`, {
             method: 'POST',
             headers: { ...getAuthHeader() },
             body: formData,

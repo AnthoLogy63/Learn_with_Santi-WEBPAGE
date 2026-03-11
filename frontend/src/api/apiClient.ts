@@ -1,4 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL;
+const rawUrl = import.meta.env.VITE_API_URL || "";
+const API_BASE_URL = rawUrl.endsWith('/') ? rawUrl.slice(0, -1) : rawUrl;
+export const API_URL = API_BASE_URL.endsWith('/api') ? API_BASE_URL : `${API_BASE_URL}/api`;
 
 export const getAuthHeader = () => {
     const user = localStorage.getItem("user");
@@ -15,7 +17,7 @@ export const apiClient = async (endpoint: string, options: RequestInit = {}) => 
         ...getAuthHeader(),
     };
 
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const response = await fetch(`${API_URL}${endpoint}`, {
         ...options,
         headers,
     });
