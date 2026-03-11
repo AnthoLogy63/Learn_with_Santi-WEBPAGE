@@ -69,7 +69,7 @@ El frontend debe saber dónde está tu API de Render.
 Normalmente en: `frontend/src/api/apiConfig.ts` (o donde definas la URL base).
 Asegúrate de que use variables de entorno:
 ```typescript
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+const API_BASE_URL = import.meta.env.VITE_API_URL;
 ```
 
 ### B. Configuración en Vercel

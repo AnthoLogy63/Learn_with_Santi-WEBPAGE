@@ -37,7 +37,7 @@ export interface CleanupResult {
 
 export const userService = {
     login: async (username: string, dni: string) => {
-        const response = await fetch("http://localhost:8000/api/users/login/", {
+        const response = await fetch("http://VITE_API_URL/api/users/login/", {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, dni }),
@@ -56,7 +56,7 @@ export const userService = {
     importUsers: async (file: File) => {
         const form = new FormData();
         form.append('file', file);
-        return fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api'}/users/import/`, {
+        return fetch(`${import.meta.env.VITE_API_URL}/users/import/`, {
             method: 'POST',
             headers: { ...getAuthHeader() },
             body: form,
