@@ -7,6 +7,7 @@ from .views import (
     UserListView,
     ImportUsersView,
     CleanupInactiveUsersView,
+    RankingView,
 )
 
 router = DefaultRouter()
@@ -19,4 +20,5 @@ urlpatterns = [
     path('list/', UserListView.as_view(), name='user-list'),
     path('import/', ImportUsersView.as_view(), name='user-import'),
     path('cleanup/', CleanupInactiveUsersView.as_view(), name='user-cleanup'),
+    path('ranking/', RankingView.as_view(), name='user-ranking'),
 ]

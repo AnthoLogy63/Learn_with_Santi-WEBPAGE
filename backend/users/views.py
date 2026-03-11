@@ -235,3 +235,28 @@ class RankViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Rank.objects.all().order_by('min_score')
     serializer_class = RankSerializer
     permission_classes = [IsAuthenticated]
+class RankingView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # Top 13 users by total_score
+        users = User.objects.all().order_by('-total_score')
+        total_users = users.count()
+        
+        # Get rank of current user
+        # We find their index in the ordered list
+        user_ids = list(users.values_list('id', flat=True))
+        try:
+            user_rank = user_ids.index(request.user.id) + 1
+        except ValueError:
+            user_rank = 0
+
+        # Serialize top 13
+        top_13 = users[:13]
+        serializer = UserListSerializer(top_13, many=True)
+        
+        return Response({
+            'top_users': serializer.data,
+            'user_rank': user_rank,
+            'total_users': total_users
+        })
