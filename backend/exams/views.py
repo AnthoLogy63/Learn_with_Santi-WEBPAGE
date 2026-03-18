@@ -481,154 +481,158 @@ class ExamenViewSet(viewsets.ModelViewSet):
         """
         examen = self.get_object()
         data = request.data
-        
-        # 1. Actualizar Metadatos
-        examen.exa_nom = data.get('exa_nom', examen.exa_nom)
-        examen.exa_des = data.get('exa_des', examen.exa_des)
-        examen.save()
 
-        questions_data = data.get('questions', [])
-        
-        with transaction.atomic():
-            # Obtener IDs de preguntas actuales para saber cuáles borrar si no vienen
-            # preguntamos si el usuario quiere "sync" total o solo procesar los que vienen
-            # El usuario dijo "todo de una", así que procesamos la lista recibida.
-            
-            for q_data in questions_data:
-                pre_cod = q_data.get('pre_cod')
-                is_deleted = q_data.get('isDeleted', False)
-                is_new = q_data.get('isNew', False)
+        try:
+            # 1. Actualizar Metadatos
+            examen.exa_nom = data.get('exa_nom', examen.exa_nom)
+            examen.exa_des = data.get('exa_des', examen.exa_des)
+            examen.save()
 
-                if is_deleted:
-                    if not is_new:
-                        Pregunta.objects.filter(pre_cod=pre_cod, exa_cod=examen).delete()
-                    continue
+            questions_data = data.get('questions', [])
 
-                # Crear o Actualizar
-                pre_defaults = {
-                    'pre_tex': q_data.get('pre_tex', ''),
-                    'pre_pun': q_data.get('pre_pun', 10),
-                    'pre_tie': q_data.get('pre_tie', 60),
-                    'tip_pre_cod_id': q_data.get('tip_pre_cod', 1),
-                }
+            with transaction.atomic():
+                for q_data in questions_data:
+                    pre_cod = q_data.get('pre_cod')
+                    is_deleted = q_data.get('isDeleted', False)
+                    is_new = q_data.get('isNew', False)
 
-                # Solo actualizar pre_fot si viene explícitamente en el JSON y no es un archivo (bulk_save es JSON)
-                if 'pre_fot' in q_data and isinstance(q_data['pre_fot'], str):
-                    val = q_data['pre_fot']
-                    if val.startswith('http://') or val.startswith('https://'):
-                        from urllib.parse import urlparse
-                        val = urlparse(val).path
-                    
-                    if val.startswith('/media/'):
-                        val = val[len('/media/'):]
-                    
-                    pre_defaults['pre_fot'] = val.strip('/')
-                
-                if is_new:
-                    import uuid
-                    new_cod = f"PRE_{uuid.uuid4().hex[:12].upper()}"
-                    pregunta = Pregunta.objects.create(
-                        pre_cod=new_cod,
-                        exa_cod=examen,
-                        **pre_defaults
-                    )
-                else:
-                    pregunta, _ = Pregunta.objects.update_or_create(
-                        pre_cod=pre_cod,
-                        exa_cod=examen,
-                        defaults=pre_defaults
-                    )
-
-                # Procesar Competencia de la Pregunta
-                com_cod = q_data.get('com_cod')
-                if com_cod:
-                    try:
-                        competencia = Competencia.objects.get(com_cod=com_cod)
-                        PreguntaCompetencia.objects.update_or_create(
-                            pre_cod=pregunta,
-                            defaults={'com_cod': competencia}
-                        )
-                    except Competencia.DoesNotExist:
-                        pass
-                else:
-                    PreguntaCompetencia.objects.filter(pre_cod=pregunta).delete()
-
-                # Procesar Opciones
-                options_data = q_data.get('options', [])
-                for o_data in options_data:
-                    opc_cod = o_data.get('opc_cod')
-                    o_deleted = o_data.get('isDeleted', False)
-                    o_new = o_data.get('isNew', False)
-
-                    if o_deleted:
-                        if not o_new:
-                            Opcion.objects.filter(opc_cod=opc_cod, pre_cod=pregunta).delete()
+                    if is_deleted:
+                        if not is_new:
+                            Pregunta.objects.filter(pre_cod=pre_cod, exa_cod=examen).delete()
                         continue
-                    
-                    o_defaults = {
-                        'opc_tex': o_data.get('opc_tex', ''),
-                        'opc_cor': o_data.get('opc_cor', False),
+
+                    # Crear o Actualizar
+                    pre_defaults = {
+                        'pre_tex': q_data.get('pre_tex', ''),
+                        'pre_pun': q_data.get('pre_pun', 10),
+                        'pre_tie': q_data.get('pre_tie', 60),
+                        'tip_pre_cod_id': q_data.get('tip_pre_cod', 1),
                     }
 
-                    if o_new:
+                    # Solo actualizar pre_fot si viene explícitamente en el JSON y no es un archivo (bulk_save es JSON)
+                    if 'pre_fot' in q_data and isinstance(q_data['pre_fot'], str):
+                        val = q_data['pre_fot']
+                        if val.startswith('http://') or val.startswith('https://'):
+                            from urllib.parse import urlparse
+                            val = urlparse(val).path
+
+                        if val.startswith('/media/'):
+                            val = val[len('/media/'):]
+
+                        pre_defaults['pre_fot'] = val.strip('/')
+
+                    if is_new:
                         import uuid
-                        Opcion.objects.create(
-                            opc_cod=f"OPC_{uuid.uuid4().hex[:15].upper()}",
-                            pre_cod=pregunta,
-                            **o_defaults
+                        new_cod = f"PRE_{uuid.uuid4().hex[:12].upper()}"
+                        pregunta = Pregunta.objects.create(
+                            pre_cod=new_cod,
+                            exa_cod=examen,
+                            **pre_defaults
                         )
                     else:
-                        Opcion.objects.update_or_create(
-                            opc_cod=opc_cod,
-                            pre_cod=pregunta,
-                            defaults=o_defaults
+                        pregunta, _ = Pregunta.objects.update_or_create(
+                            pre_cod=pre_cod,
+                            exa_cod=examen,
+                            defaults=pre_defaults
                         )
 
-            # --- Procesar Configuración de Examen (Categorías y Competencias) ---
-            config_data = data.get('config', [])
-            if config_data is not None:
-                # 1. Limpiar configuración actual
-                CategoriaExamen.objects.filter(exa_cod=examen).delete()
-                ExamenCategoriaCompetencia.objects.filter(exa_cod=examen).delete()
+                    # Procesar Competencia de la Pregunta
+                    com_cod = q_data.get('com_cod')
+                    if com_cod:
+                        try:
+                            competencia = Competencia.objects.get(com_cod=com_cod)
+                            PreguntaCompetencia.objects.update_or_create(
+                                pre_cod=pregunta,
+                                defaults={'com_cod': competencia}
+                            )
+                        except Competencia.DoesNotExist:
+                            pass
+                    else:
+                        PreguntaCompetencia.objects.filter(pre_cod=pregunta).delete()
 
-                # 2. Recrear según la nueva data
-                for c_item in config_data:
-                    cat_cod = c_item.get('cat_cod')
-                    if not cat_cod: continue
+                    # Procesar Opciones
+                    options_data = q_data.get('options', [])
+                    for o_data in options_data:
+                        opc_cod = o_data.get('opc_cod')
+                        o_deleted = o_data.get('isDeleted', False)
+                        o_new = o_data.get('isNew', False)
 
-                    try:
-                        categoria = Categoria.objects.get(cat_cod=cat_cod)
-                        # Vincular categoría al examen
-                        CategoriaExamen.objects.get_or_create(exa_cod=examen, cat_cod=categoria)
+                        if o_deleted:
+                            if not o_new:
+                                Opcion.objects.filter(opc_cod=opc_cod, pre_cod=pregunta).delete()
+                            continue
 
-                        # Vincular competencias de esta categoría
-                        comp_configs = c_item.get('competencies', [])
-                        for co_conf in comp_configs:
-                            com_cod = co_conf.get('com_cod')
-                            num_preg = co_conf.get('num_preguntas', 0)
-                            if not com_cod: continue
+                        o_defaults = {
+                            'opc_tex': o_data.get('opc_tex', ''),
+                            'opc_cor': o_data.get('opc_cor', False),
+                        }
 
-                            try:
-                                competencia = Competencia.objects.get(com_cod=com_cod)
-                                ExamenCategoriaCompetencia.objects.create(
-                                    exa_cod=examen,
-                                    cat_cod=categoria,
-                                    com_cod=competencia,
-                                    num_preguntas=num_preg
-                                )
-                            except Competencia.DoesNotExist:
-                                continue
-                    except Categoria.DoesNotExist:
-                        continue
+                        if o_new:
+                            import uuid
+                            Opcion.objects.create(
+                                opc_cod=f"OPC_{uuid.uuid4().hex[:15].upper()}",
+                                pre_cod=pregunta,
+                                **o_defaults
+                            )
+                        else:
+                            Opcion.objects.update_or_create(
+                                opc_cod=opc_cod,
+                                pre_cod=pregunta,
+                                defaults=o_defaults
+                            )
 
-        # Aseguramos devolver todo el estado fresco para sincronizar el frontend
-        updated_questions = Pregunta.objects.filter(exa_cod=examen).prefetch_related('opciones')
-        
-        return Response({
-            'status': 'ok', 
-            'exam': ExamenSerializer(examen, context={'request': request}).data,
-            'questions': PreguntaSerializer(updated_questions, many=True, context={'request': request}).data
-        })
+                # --- Procesar Configuración de Examen (Categorías y Competencias) ---
+                config_data = data.get('config', [])
+                if config_data is not None:
+                    # 1. Limpiar configuración actual
+                    CategoriaExamen.objects.filter(exa_cod=examen).delete()
+                    ExamenCategoriaCompetencia.objects.filter(exa_cod=examen).delete()
+
+                    # 2. Recrear según la nueva data
+                    for c_item in config_data:
+                        cat_cod = c_item.get('cat_cod')
+                        if not cat_cod: continue
+
+                        try:
+                            categoria = Categoria.objects.get(cat_cod=cat_cod)
+                            # Vincular categoría al examen
+                            CategoriaExamen.objects.get_or_create(exa_cod=examen, cat_cod=categoria)
+
+                            # Vincular competencias de esta categoría
+                            comp_configs = c_item.get('competencies', [])
+                            for co_conf in comp_configs:
+                                com_cod = co_conf.get('com_cod')
+                                num_preg = co_conf.get('num_preguntas', 0)
+                                if not com_cod: continue
+
+                                try:
+                                    competencia = Competencia.objects.get(com_cod=com_cod)
+                                    ExamenCategoriaCompetencia.objects.create(
+                                        exa_cod=examen,
+                                        cat_cod=categoria,
+                                        com_cod=competencia,
+                                        num_preguntas=num_preg
+                                    )
+                                except Competencia.DoesNotExist:
+                                    continue
+                        except Categoria.DoesNotExist:
+                            continue
+
+            # Aseguramos devolver todo el estado fresco para sincronizar el frontend
+            updated_questions = Pregunta.objects.filter(exa_cod=examen).prefetch_related('opciones')
+
+            return Response({
+                'status': 'ok',
+                'exam': ExamenSerializer(examen, context={'request': request}).data,
+                'questions': PreguntaSerializer(updated_questions, many=True, context={'request': request}).data
+            })
+
+        except Exception as e:
+            import traceback
+            return Response(
+                {'error': str(e), 'detail': traceback.format_exc()},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
     def get_config(self, request, pk=None):

@@ -93,21 +93,31 @@ class ExamenSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
     def get_status(self, obj):
-        user = self.context['request'].user
-        if Intento.objects.filter(usu_cod=user, exa_cod=obj, exa_fec_fin__isnull=False).exists():
-            return 'completed'
-        return 'pending'
+        try:
+            user = self.context.get('request') and self.context['request'].user
+            if not user or not user.is_authenticated:
+                return 'pending'
+            if Intento.objects.filter(usu_cod=user, exa_cod=obj, exa_fec_fin__isnull=False).exists():
+                return 'completed'
+            return 'pending'
+        except Exception:
+            return 'pending'
 
     def get_last_score(self, obj):
-        user = self.context['request'].user
-        best_attempt = Intento.objects.filter(
-            usu_cod=user, 
-            exa_cod=obj, 
-            exa_fec_fin__isnull=False
-        ).order_by('-exa_pun_tot').first()
-        if best_attempt:
-            return best_attempt.exa_pun_tot
-        return None
+        try:
+            user = self.context.get('request') and self.context['request'].user
+            if not user or not user.is_authenticated:
+                return None
+            best_attempt = Intento.objects.filter(
+                usu_cod=user,
+                exa_cod=obj,
+                exa_fec_fin__isnull=False
+            ).order_by('-exa_pun_tot').first()
+            if best_attempt:
+                return best_attempt.exa_pun_tot
+            return None
+        except Exception:
+            return None
 
 class RespuestaSerializer(serializers.ModelSerializer):
     class Meta:
