@@ -11,10 +11,11 @@ const AdminProfile = ({ activeTab, setActiveTab }: AdminProfileProps) => {
 
     if (!user) return null;
 
-    const initials = user.username.slice(0, 2).toUpperCase();
+    const username = user.username || user.usu_cod || "Admin";
+    const initials = username.slice(0, 2).toUpperCase();
 
     // Generate deterministic color from username
-    const hash = user.username.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+    const hash = username.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
     const palette = [
         ['#001c4d', '#3b82f6'], // navy/blue
         ['#065f46', '#10b981'], // green
@@ -47,7 +48,7 @@ const AdminProfile = ({ activeTab, setActiveTab }: AdminProfileProps) => {
                 </div>
 
                 <h3 className="text-base font-bold text-slate-900 tracking-tight">
-                    @{user.username}
+                    @{username}
                 </h3>
             </div>
 

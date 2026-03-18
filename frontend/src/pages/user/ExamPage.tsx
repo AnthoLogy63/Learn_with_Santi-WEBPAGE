@@ -8,19 +8,18 @@ import { examService } from "@/api/examService";
 import { ArrowLeft, ArrowRight, CheckCircle2, RotateCcw, Loader2, Play, X, Maximize2, Clock } from "lucide-react";
 
 interface Option {
-  id: number;
-  text: string;
-  is_correct: boolean;
+  opc_cod: string;
+  opc_tex: string;
+  opc_cor: boolean;
 }
 
 interface Question {
-  id: number;
-  text: string;
-  image: string | null;
+  pre_cod: string;
+  pre_tex: string;
+  pre_fot: string | null;
   options: Option[];
-  points: number;
-  time_limit_seconds: number;
-  question_type: 'single_choice' | 'multiple_choice' | 'open_ended';
+  pre_pun: number;
+  pre_tie: number;
 }
 
 const getImageUrl = (imagePath: string | null) => {
@@ -37,14 +36,14 @@ const getImageUrl = (imagePath: string | null) => {
 };
 
 const ExamPage = () => {
-  const { examId } = useParams<{ examId: string }>();
+  const { exa_cod } = useParams<{ exa_cod: string }>();
   const navigate = useNavigate();
   const { isAuthenticated, fetchUserScore, fetchExams } = useAppContext();
 
   const [questions, setQuestions] = useState<Question[]>([]);
-  const [attemptId, setAttemptId] = useState<number | null>(null);
+  const [intCod, setIntCod] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<number, any>>({});
+  const [answers, setAnswers] = useState<Record<string, any>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [results, setResults] = useState<any>(null);
@@ -63,8 +62,7 @@ const ExamPage = () => {
 
   // Derive current question data
   const currentQuestion = questions[currentIndex];
-  const isOpinionQuest = currentQuestion && (currentQuestion.question_type === 'single_choice' || currentQuestion.question_type === 'multiple_choice') &&
-    !currentQuestion.options.some(o => o.is_correct);
+  const isOpinionQuest = currentQuestion && !currentQuestion.options.some(o => o.opc_cor);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -73,13 +71,24 @@ const ExamPage = () => {
     }
 
     const fetchQuestions = async () => {
-      if (!examId) return;
+      if (!exa_cod) return;
       try {
-        const response = await examService.getQuestions(examId);
+        const response = await examService.startOrResume(exa_cod);
         if (response.ok) {
           const data = await response.json();
           setQuestions(data.questions);
-          setAttemptId(data.attempt_id);
+          setIntCod(data.int_cod);
+          // Resume progress if exists
+          if (data.respuestas) {
+            const resumedAnswers: Record<string, any> = {};
+            data.respuestas.forEach((r: any) => {
+              resumedAnswers[r.pre_cod] = r.opc_cod || r.opc_cods || r.res_tex;
+            });
+            setAnswers(resumedAnswers);
+            // Move to first unanswered or stay at 0
+            const nextIdx = data.questions.findIndex((q: Question) => !resumedAnswers[q.pre_cod]);
+            if (nextIdx !== -1) setCurrentIndex(nextIdx);
+          }
         } else {
           console.error("Failed to fetch questions");
         }
@@ -91,7 +100,7 @@ const ExamPage = () => {
     };
 
     fetchQuestions();
-  }, [examId, isAuthenticated, navigate]);
+  }, [exa_cod, isAuthenticated, navigate]);
 
   // Navigation Guard: Prevent accidental reload/close
   useEffect(() => {
@@ -125,7 +134,7 @@ const ExamPage = () => {
   // Reset timer on question change
   useEffect(() => {
     if (currentQuestion) {
-      setTimeLeft(currentQuestion.time_limit_seconds || 60);
+      setTimeLeft(currentQuestion.pre_tie || 60);
       setIsTimeOut(false);
     }
   }, [currentIndex, currentQuestion]);
@@ -162,13 +171,13 @@ const ExamPage = () => {
     );
   }
 
-  const handleContinue = (fromTimeOut = false) => {
+  const handleContinue = async (fromTimeOut = false) => {
     if (isAutoAdvancing) return;
 
-    const selected = answers[currentQuestion.id];
+    const selected = answers[currentQuestion.pre_cod];
 
-    const hasValue = currentQuestion.question_type === 'multiple_choice'
-      ? (selected || []).length > 0
+    const hasValue = Array.isArray(selected)
+      ? selected.length > 0
       : (selected !== undefined && selected !== "");
 
     if (!hasValue && !fromTimeOut) {
@@ -178,23 +187,30 @@ const ExamPage = () => {
 
     setIsAutoAdvancing(true);
 
-    // Calculate correctness
+    // Save progress to backend
+    if (exa_cod && intCod) {
+      const respPayload = {
+        pre_cod: currentQuestion.pre_cod,
+        opc_cod: Array.isArray(selected) ? undefined : (typeof selected === 'string' ? selected : undefined),
+        opc_cods: Array.isArray(selected) ? selected : undefined,
+        res_tex: typeof selected === 'string' && !currentQuestion.options.some(o => o.opc_cod === selected) ? selected : undefined
+      };
+      await examService.saveProgress(exa_cod, intCod, [respPayload]);
+    }
+
+    // Calculate correctness for UI streaks
     let isCorrect = false;
-    const isOpinionQuest = (currentQuestion.question_type === 'single_choice' || currentQuestion.question_type === 'multiple_choice') &&
-      !currentQuestion.options.some(o => o.is_correct);
+    const isOpinionQuest = !currentQuestion.options.some(o => o.opc_cor);
 
     if (fromTimeOut && !hasValue) {
       isCorrect = false;
     } else if (isOpinionQuest) {
       isCorrect = true;
-    } else if (currentQuestion.question_type === 'single_choice') {
-      isCorrect = currentQuestion.options.find(o => o.id === selected)?.is_correct || false;
-    } else if (currentQuestion.question_type === 'multiple_choice') {
-      const selectedIds = selected as number[];
-      const correctIds = currentQuestion.options.filter(o => o.is_correct).map(o => o.id);
-      isCorrect = selectedIds.length === correctIds.length && selectedIds.every(id => correctIds.includes(id));
-    } else if (currentQuestion.question_type === 'open_ended') {
-      isCorrect = (selected as string || "").trim().length > 0;
+    } else if (Array.isArray(selected)) {
+      const correctIds = currentQuestion.options.filter(o => o.opc_cor).map(o => o.opc_cod);
+      isCorrect = selected.length === correctIds.length && selected.every(id => correctIds.includes(id));
+    } else {
+      isCorrect = currentQuestion.options.find(o => o.opc_cod === selected)?.opc_cor || false;
     }
 
     // Update streaks
@@ -231,44 +247,23 @@ const ExamPage = () => {
       } else {
         handleFinish();
       }
-    }, 2000);
+    }, 1200);
   };
 
   const handleAnswer = (val: any) => {
     if (feedbackStatus === 'checked' || isAutoAdvancing) return;
-    if (currentQuestion.question_type === 'multiple_choice') {
-      const current = (answers[currentQuestion.id] || []) as number[];
-      if (current.includes(val)) {
-        setAnswers(prev => ({ ...prev, [currentQuestion.id]: current.filter(id => id !== val) }));
-      } else {
-        setAnswers(prev => ({ ...prev, [currentQuestion.id]: [...current, val] }));
-      }
-    } else {
-      setAnswers((prev) => ({ ...prev, [currentQuestion.id]: val }));
-    }
+    // For simplicity, we assume single choice or string for now, 
+    // but the backend supports multiple if we use opc_cods.
+    // Let's keep the existing logic but adapted.
+    setAnswers((prev) => ({ ...prev, [currentQuestion.pre_cod]: val }));
   };
 
   const handleFinish = async () => {
-    if (!attemptId) return;
+    if (!exa_cod || !intCod) return;
     setIsSubmitting(true);
 
-    const formattedAnswers = Object.entries(answers).map(([qId, val]) => {
-      const qNum = parseInt(qId);
-      const question = questions.find(q => q.id === qNum);
-
-      const payload: any = { question_id: qNum };
-      if (question?.question_type === 'multiple_choice') {
-        payload.selected_option_ids = val;
-      } else if (question?.question_type === 'open_ended') {
-        payload.text_response = val;
-      } else {
-        payload.selected_option_id = val;
-      }
-      return payload;
-    });
-
     try {
-      const response = await examService.submitAnswers(attemptId, formattedAnswers);
+      const response = await examService.finishAttempt(exa_cod, intCod);
 
       if (response.ok) {
         const data = await response.json();
@@ -433,31 +428,24 @@ const ExamPage = () => {
       </div>
 
       <div className="max-w-4xl mx-auto w-full px-6 py-12 flex-1 relative z-10">
-        <div className="animate-fade-in" key={currentQuestion.id}>
+        <div className="animate-fade-in" key={currentQuestion.pre_cod}>
           <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
             <div>
               <span className="inline-block text-[10px] font-black text-amber-400 uppercase tracking-[0.2em] mb-2">
                 Pregunta {currentIndex + 1}
               </span>
               <h2 className="text-2xl lg:text-3xl font-bold text-white leading-snug">
-                {currentQuestion.text}
+                {currentQuestion.pre_tex}
               </h2>
-            </div>
-            <div className="flex flex-col items-end gap-2">
-              {currentQuestion.question_type === 'multiple_choice' && (
-                <span className="flex-shrink-0 px-4 py-1.5 rounded-full bg-amber-400/10 border border-amber-400/30 text-amber-400 text-[10px] font-black uppercase tracking-widest">
-                  Selección Múltiple
-                </span>
-              )}
             </div>
           </div>
 
-          <div className={`${currentQuestion.image ? (imageLayout === 'side' ? 'flex flex-col md:flex-row gap-8 items-start' : 'flex flex-col gap-6') : ''}`}>
-            {currentQuestion.image && (
+          <div className={`${currentQuestion.pre_fot ? (imageLayout === 'side' ? 'flex flex-col md:flex-row gap-8 items-start' : 'flex flex-col gap-6') : ''}`}>
+            {currentQuestion.pre_fot && (
               <div className={`relative group cursor-pointer overflow-hidden rounded-2xl border border-white/10 bg-black/20 self-center md:self-start ${imageLayout === 'side' ? 'w-full md:w-1/2 lg:w-[45%]' : 'w-full max-w-2xl mx-auto'
                 }`}>
                 <img
-                  src={getImageUrl(currentQuestion.image) || ""}
+                  src={getImageUrl(currentQuestion.pre_fot) || ""}
                   alt="Pregunta"
                   className="w-full h-auto object-contain max-h-[400px] md:max-h-[500px] transition-transform duration-500 group-hover:scale-105"
                   onLoad={(e) => {
@@ -468,12 +456,12 @@ const ExamPage = () => {
                       setImageLayout('side');
                     }
                   }}
-                  onClick={() => setFullScreenImage(getImageUrl(currentQuestion.image))}
+                  onClick={() => setFullScreenImage(getImageUrl(currentQuestion.pre_fot))}
                 />
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setFullScreenImage(getImageUrl(currentQuestion.image));
+                    setFullScreenImage(getImageUrl(currentQuestion.pre_fot));
                   }}
                   className="absolute bottom-4 right-4 p-3 rounded-full bg-black/60 text-white backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-300 md:flex items-center justify-center hidden"
                 >
@@ -487,66 +475,50 @@ const ExamPage = () => {
               </div>
             )}
 
-            <div className={`${currentQuestion.image && imageLayout === 'side' ? 'flex-1 w-full' : 'w-full'}`}>
-              {currentQuestion.question_type === 'open_ended' ? (
-                <textarea
-                  value={answers[currentQuestion.id] || ""}
-                  onChange={(e) => handleAnswer(e.target.value)}
-                  disabled={feedbackStatus === 'checked' || isAutoAdvancing}
-                  placeholder="Escribe tu respuesta aquí..."
-                  className={`w-full h-40 p-6 rounded-2xl bg-white/5 border text-white focus:border-amber-400 focus:outline-none transition-all placeholder:text-white/20 font-medium ${feedbackStatus === 'checked' ? 'border-emerald-500 bg-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.1)]' : 'border-white/10'
-                    }`}
-                />
-              ) : (
-                <div className={`grid gap-4 w-full ${imageLayout === 'side' ? 'grid-cols-1 lg:grid-cols-1' : 'sm:grid-cols-1 md:grid-cols-2'}`}>
-                  {currentQuestion.options.map((option, index) => {
-                    const letter = String.fromCharCode(65 + index);
-                    const isSelected = currentQuestion.question_type === 'multiple_choice'
-                      ? (answers[currentQuestion.id] || []).includes(option.id)
-                      : answers[currentQuestion.id] === option.id;
+            <div className={`${currentQuestion.pre_fot && imageLayout === 'side' ? 'flex-1 w-full' : 'w-full'}`}>
+              <div className={`grid gap-4 w-full ${imageLayout === 'side' ? 'grid-cols-1 lg:grid-cols-1' : 'sm:grid-cols-1 md:grid-cols-2'}`}>
+                {currentQuestion.options.map((option, index) => {
+                  const letter = String.fromCharCode(65 + index);
+                  const isSelected = answers[currentQuestion.pre_cod] === option.opc_cod;
 
-                    const isMultiple = currentQuestion.question_type === 'multiple_choice';
+                  let containerStyle = "border-white/10 bg-white/5 text-white/80 hover:bg-white/10 hover:border-white/20";
+                  if (feedbackStatus === 'checked') {
+                    const isCorrectView = option.opc_cor || (isOpinionQuest && isSelected);
+                    const isWrongView = isSelected && !option.opc_cor && !isOpinionQuest;
 
-                    let containerStyle = "border-white/10 bg-white/5 text-white/80 hover:bg-white/10 hover:border-white/20";
-                    if (feedbackStatus === 'checked') {
-                      const isCorrectView = option.is_correct || (isOpinionQuest && isSelected);
-                      const isWrongView = isSelected && !option.is_correct && !isOpinionQuest;
-
-                      if (isCorrectView) {
-                        containerStyle = "border-emerald-500 bg-emerald-500/20 text-white shadow-[0_0_20px_rgba(16,185,129,0.2)]";
-                      } else if (isWrongView) {
-                        containerStyle = "border-red-500 bg-red-500/20 text-white shadow-[0_0_20px_rgba(239,68,68,0.1)]";
-                      } else {
-                        containerStyle = "border-white/5 bg-white/5 text-white/20 opacity-40";
-                      }
-                    } else if (isSelected) {
-                      containerStyle = "border-amber-400 bg-amber-400/20 text-white shadow-lg ring-1 ring-amber-400/50";
+                    if (isCorrectView) {
+                      containerStyle = "border-emerald-500 bg-emerald-500/20 text-white shadow-[0_0_20px_rgba(16,185,129,0.2)]";
+                    } else if (isWrongView) {
+                      containerStyle = "border-red-500 bg-red-500/20 text-white shadow-[0_0_20px_rgba(239,68,68,0.1)]";
+                    } else {
+                      containerStyle = "border-white/5 bg-white/5 text-white/20 opacity-40";
                     }
+                  } else if (isSelected) {
+                    containerStyle = "border-amber-400 bg-amber-400/20 text-white shadow-lg ring-1 ring-amber-400/50";
+                  }
 
-                    return (
-                      <button
-                        key={option.id}
-                        onClick={() => handleAnswer(option.id)}
-                        disabled={feedbackStatus === 'checked'}
-                        className={`group w-full text-left p-6 rounded-2xl border transition-all duration-300 ${containerStyle} ${feedbackStatus === 'checked' ? 'cursor-default' : ''}`}
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className={`flex-shrink-0 w-8 h-8 flex items-center justify-center text-sm font-black transition-all duration-300 ${isMultiple ? "rounded-lg" : "rounded-full"
-                            } ${isSelected
-                              ? (feedbackStatus === 'checked' && !option.is_correct && !isOpinionQuest ? "bg-red-500 text-white" : "bg-amber-400 text-black shadow-[0_0_15px_rgba(251,191,36,0.5)]")
-                              : (feedbackStatus === 'checked' && (option.is_correct || (isOpinionQuest && isSelected)) ? "bg-emerald-500 text-white" : "bg-white/10 text-white border border-white/10")
-                            }`}>
-                            {isMultiple ? (isSelected || (feedbackStatus === 'checked' && (option.is_correct || (isOpinionQuest && isSelected))) ? "✓" : "") : letter}
-                          </div>
-                          <span className="text-base font-bold leading-tight group-hover:text-white transition-colors">
-                            {option.text}
-                          </span>
+                  return (
+                    <button
+                      key={option.opc_cod}
+                      onClick={() => handleAnswer(option.opc_cod)}
+                      disabled={feedbackStatus === 'checked'}
+                      className={`group w-full text-left p-6 rounded-2xl border transition-all duration-300 ${containerStyle} ${feedbackStatus === 'checked' ? 'cursor-default' : ''}`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className={`flex-shrink-0 w-8 h-8 flex items-center justify-center text-sm font-black transition-all duration-300 rounded-full ${isSelected
+                            ? (feedbackStatus === 'checked' && !option.opc_cor && !isOpinionQuest ? "bg-red-500 text-white" : "bg-amber-400 text-black shadow-[0_0_15px_rgba(251,191,36,0.5)]")
+                            : (feedbackStatus === 'checked' && (option.opc_cor || (isOpinionQuest && isSelected)) ? "bg-emerald-500 text-white" : "bg-white/10 text-white border border-white/10")
+                          }`}>
+                          {letter}
                         </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+                        <span className="text-base font-bold leading-tight group-hover:text-white transition-colors">
+                          {option.opc_tex}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>

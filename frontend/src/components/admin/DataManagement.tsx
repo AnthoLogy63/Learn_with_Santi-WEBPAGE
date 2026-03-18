@@ -71,21 +71,28 @@ const EXPORT_ACTIONS: ImportAction[] = [
 
 // ─── Formato de columnas esperadas ──────────────────────────────────────────
 const FORMAT_COLUMNS = [
-    { col: "ASESOR ANALISTA", desc: "Nombre de usuario (Login)", required: true, example: "jperez" },
+    { col: "ASESOR ANALISTA", desc: "Usuario o Código (Login)", required: true, example: "jperez" },
     { col: "NUMERO DOCUMENTO", desc: "DNI (Password)", required: true, example: "12345678" },
-    { col: "NOMBRE", desc: "Nombre (Opcional)", required: false, example: "Juan" },
-    { col: "APELLIDO", desc: "Apellido (Opcional)", required: false, example: "Pérez" },
-    { col: "ES_ADMIN", desc: "¿Administrador? (TRUE/FALSE)", required: false, example: "FALSE" },
+    { col: "NOMBRE COMPLETO", desc: "Nombre completo del analista", required: false, example: "Juan Pérez" },
+    { col: "GENERO", desc: "Masculino o Femenino", required: false, example: "Masculino" },
+    { col: "EDAD", desc: "Edad en años", required: false, example: "25" },
+    { col: "ZONA", desc: "Zona o sede", required: false, example: "Lima" },
+    { col: "ANTIGUEDAD", desc: "Años en la empresa", required: false, example: "2" },
+    { col: "CATEGORIA", desc: "CÓDIGO de la categoría (Ej: 0, 1, 2)", required: false, example: "0" },
 ];
 
 const FORMAT_EXAM_COLUMNS = [
-    { col: "exam_name", desc: "Nombre único de la evaluación", required: true, example: "Cumplimiento 2024" },
-    { col: "question_text", desc: "Texto de la pregunta", required: true, example: "¿Qué es AML?" },
-    { col: "question_type", desc: "single_choice / multiple_choice / open_ended", required: true, example: "single_choice" },
-    { col: "option_text", desc: "Texto de la respuesta (vacío en open_ended)", required: true, example: "Anti Lavado de Dinero" },
-    { col: "is_correct", desc: "Si la opción es válida (TRUE / FALSE)", required: true, example: "TRUE" },
-    { col: "tiempo_segundos", desc: "Tiempo para responder (default 60)", required: false, example: "45" },
-    { col: "question_points", desc: "Puntos de esta pregunta (default 10)", required: false, example: "20" },
+    { col: "EXAMEN", desc: "Título/Nombre de la evaluación", required: false, example: "Examen de Inducción" },
+    { col: "CATEGORIA", desc: "CÓDIGO de la categoría (Ej: 0, 1)", required: false, example: "0" },
+    { col: "COMPETENCIA", desc: "CÓDIGO de la competencia (Ej: COMP-LOGICA)", required: false, example: "COMP-AGILIDAD-MENTAL" },
+    { col: "PREGUNTA", desc: "El texto de la pregunta", required: true, example: "¿Cuál es el color del cielo?" },
+    { col: "PUNTOS", desc: "Puntos otorgados (default 10)", required: false, example: "10" },
+    { col: "TIEMPO", desc: "Segundos para responder (default 60)", required: false, example: "45" },
+    { col: "OPCION_1", desc: "Respuesta A", required: true, example: "Azul" },
+    { col: "OPCION_2", desc: "Respuesta B", required: true, example: "Verde" },
+    { col: "OPCION_3", desc: "Respuesta C", required: false, example: "Rojo" },
+    { col: "OPCION_4", desc: "Respuesta D", required: false, example: "Amarillo" },
+    { col: "CORRECTA", desc: "Número de la opción correcta (1-4)", required: true, example: "1" },
 ];
 
 // ─── Componente principal ────────────────────────────────────────────────────
@@ -310,10 +317,19 @@ const ImportUsuariosPanel = () => {
                 </button>
 
                 {showFormat && (
-                    <div className="px-4 pb-4 space-y-3">
-                        <p className="text-xs text-white/50">
-                            El archivo debe ser <span className="text-white font-bold">.xlsx</span>. La primera fila debe ser el encabezado con exactamente estos nombres de columna:
-                        </p>
+                    <div className="px-4 pb-4 space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <p className="text-xs text-white/50">
+                                El archivo debe ser <span className="text-white font-bold">.xlsx</span>. La primera fila debe ser el encabezado:
+                            </p>
+                            <button
+                                onClick={() => userService.downloadTemplate().catch(e => toast.error(e.message))}
+                                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-[11px] font-black uppercase tracking-wider transition-all"
+                            >
+                                <Download className="h-3.5 w-3.5 text-blue-400" />
+                                Descargar Plantilla .xlsx
+                            </button>
+                        </div>
                         <div className="overflow-x-auto rounded-lg border border-white/10">
                             <table className="w-full text-xs">
                                 <thead>
@@ -535,17 +551,26 @@ const ImportExamenPanel = () => {
 
                 {showFormat && (
                     <div className="px-4 pb-4 space-y-4">
-                        <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-4 py-3">
-                            <p className="text-xs text-indigo-300 leading-relaxed font-bold">
-                                💡 ¿Cómo meter 4 respuestas para una misma pregunta?
-                            </p>
-                            <p className="text-[11px] text-indigo-200/70 mt-1 leading-relaxed">
-                                Debes crear <strong className="text-white">4 filas seguidas</strong> con el mismo <code className="text-white bg-white/10 px-1 rounded">question_text</code>. Cada fila llevará una de las opciones en <code className="text-white bg-white/10 px-1 rounded">option_text</code>. El sistema las agrupará automáticamente.
-                            </p>
+                        <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-4 py-3 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+                            <div>
+                                <p className="text-xs text-indigo-300 leading-relaxed font-bold">
+                                    💡 Nuevo: Gestión por Categorías y Competencias
+                                </p>
+                                <p className="text-[11px] text-indigo-200/70 mt-1 leading-relaxed">
+                                    Define la <strong className="text-white">Categoría</strong> del examen y la <strong className="text-white">Competencia</strong> de cada pregunta.
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => examService.downloadTemplate().catch(e => toast.error(e.message))}
+                                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 text-white text-[11px] font-black uppercase tracking-wider transition-all shadow-lg backdrop-blur-sm shrink-0"
+                            >
+                                <Download className="h-3.5 w-3.5 text-purple-400" />
+                                Descargar Plantilla .xlsx
+                            </button>
                         </div>
 
                         <p className="text-xs text-white/50 leading-relaxed">
-                            Asegúrate de que la primera fila del examen contenga el <strong>nombre y descripción</strong> del mismo. Si dejas la columna de pregunta vacía en las filas siguientes, se asignarán a la última pregunta detectada.
+                            Asegúrate de que la primera fila contenga los encabezados exactos. Si el sistema no encuentra un examen activo, creará uno nuevo automáticamente basado en el nombre del archivo.
                         </p>
                         <div className="overflow-x-auto rounded-lg border border-white/10">
                             <table className="w-full text-xs">

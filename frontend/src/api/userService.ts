@@ -8,18 +8,20 @@ export interface Rank {
 }
 
 export interface User {
-    id: number;
+    usu_cod: string;
     username: string;
-    first_name: string;
-    last_name: string;
-    dni: string;
-    total_score: number;
-    current_rank: Rank | null;
-    profile_image: string | null;
+    usu_dni: string;
+    usu_nom: string;
+    usu_sex: 'M' | 'F' | null;
+    usu_edad: number;
+    usu_pun_tot: number;
+    cat_cod: string | null;
+    ran_sig: number | null;
+    usu_fec_ult: string | null;
+    usu_reg: string;
     is_staff: boolean;
-    is_active: boolean;
-    last_login: string | null;
-    date_joined: string;
+    usu_fot?: string | null;
+    ran_nom?: string;
 }
 
 export interface ImportResult {
@@ -45,8 +47,8 @@ export const userService = {
         return response;
     },
 
-    getUserScore: async (userId: number) => {
-        return apiClient(`/users/score/${userId}/`);
+    getUserScore: async (usu_cod: string) => {
+        return apiClient(`/users/score/${usu_cod}/`);
     },
 
     listUsers: async () => {
@@ -73,5 +75,20 @@ export const userService = {
 
     getRanking: async () => {
         return apiClient(`/users/ranking/`);
+    },
+
+    downloadTemplate: async () => {
+        const res = await fetch(`${API_URL}/users/template/`, {
+            headers: { ...getAuthHeader() },
+        });
+        if (!res.ok) throw new Error("Error al descargar la plantilla");
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'plantilla_usuarios.xlsx';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
     },
 };

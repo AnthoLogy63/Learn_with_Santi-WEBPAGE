@@ -40,7 +40,7 @@ const App = () => (
             </Route>
 
             {/* Full screen pages like ExamPage */}
-            <Route path="/exam/:examId" element={<ExamPage />} />
+            <Route path="/exam/:exa_cod" element={<ExamPage />} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>

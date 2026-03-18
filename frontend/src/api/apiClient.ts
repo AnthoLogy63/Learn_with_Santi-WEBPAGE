@@ -5,9 +5,9 @@ export const API_URL = API_BASE_URL.endsWith('/api') ? API_BASE_URL : `${API_BAS
 export const getAuthHeader = () => {
     const user = localStorage.getItem("user");
     if (!user) return {};
-    const { username, dni } = JSON.parse(user);
+    const { usu_cod, usu_dni } = JSON.parse(user);
     return {
-        'Authorization': `Basic ${btoa(`${username}:${dni}`)}`,
+        'Authorization': `Basic ${btoa(`${usu_cod}:${usu_dni}`)}`,
     };
 };
 

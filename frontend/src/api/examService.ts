@@ -1,34 +1,58 @@
 import { apiClient, getAuthHeader, API_URL } from "./apiClient";
 
 export interface Exam {
-    id: number;
-    name: string;
-    description: string;
-    is_active: boolean;
-    is_enabled: boolean;
-    is_timed: boolean;
-    status: "pending" | "completed";
-    last_score?: number;
-    bank_total_questions?: number;
-    questions_per_attempt?: number;
-    max_scored_attempts?: number;
-    max_points?: number;
+    exa_cod: string;
+    exa_nom: string;
+    exa_des: string;
+    exa_fot?: string | null;
+    status?: string;
+}
+
+export interface Categoria {
+    cat_cod: string;
+    cat_nom: string;
+}
+
+export interface Competencia {
+    com_cod: string;
+    com_nom: string;
+    com_des: string | null;
+}
+
+export interface TipoPregunta {
+    tip_pre_cod: number;
+    tip_pre_nom: string;
+}
+
+export interface ExamOption {
+    opc_cod: string;
+    opc_tex: string;
+    opc_cor: boolean;
+}
+
+export interface LocalOption extends ExamOption {
+    isNew?: boolean;
+    isDirty?: boolean;
+    isDeleted?: boolean;
 }
 
 export interface Question {
-    id: number;
-    text: string;
-    image: string | null;
-    question_type: "single_choice" | "multiple_choice" | "open_ended";
-    points: number;
-    time_limit_seconds: number;
-    options: Option[];
+    pre_cod: string;
+    pre_tex: string;
+    pre_fot: string | null;
+    pre_pun: number;
+    pre_tie: number;
+    tip_pre_cod?: number;
+    com_cod?: string;
+    options: LocalOption[];
 }
 
-export interface Option {
-    id: number;
-    text: string;
-    is_correct: boolean;
+export interface LocalQuestion extends Question {
+    isNew?: boolean;
+    isDirty?: boolean;
+    isDeleted?: boolean;
+    tempImageFile?: File;
+    tempImageUrl?: string;
 }
 
 export interface ExamImportResult {
@@ -41,8 +65,24 @@ export interface ExamImportResult {
 }
 
 export const examService = {
-    getExams: async () => {
-        return apiClient("/exams/");
+    getExams: async (): Promise<Exam[]> => {
+        const res = await apiClient("/exams/");
+        return res.json();
+    },
+
+    getCategorias: async (): Promise<Categoria[]> => {
+        const res = await apiClient("/exams/categorias/");
+        return res.json();
+    },
+
+    getCompetencias: async (): Promise<Competencia[]> => {
+        const res = await apiClient("/exams/competencias/");
+        return res.json();
+    },
+
+    getTipoPreguntas: async (): Promise<TipoPregunta[]> => {
+        const res = await apiClient("/exams/tipos-pregunta/");
+        return res.json();
     },
 
     createExam: async (data: Partial<Exam>) => {
@@ -53,97 +93,112 @@ export const examService = {
         });
     },
 
-    updateExam: async (id: number, data: Partial<Exam>) => {
-        return apiClient(`/exams/${id}/`, {
+    assignCategoryToExam: async (exa_cod: string, cat_cod: string) => {
+        return apiClient("/exams/categoria_examen/", {
+            method: 'POST',
+            body: JSON.stringify({ exa_cod, cat_cod }),
+            headers: { 'Content-Type': 'application/json' },
+        });
+    },
+
+    assignCompetenceToExam: async (data: { exa_cod: string, cat_cod: string, com_cod: string, num_preguntas: number }) => {
+        return apiClient("/exams/examen_categoria_competencia/", {
+            method: 'POST',
+            body: JSON.stringify(data),
+            headers: { 'Content-Type': 'application/json' },
+        });
+    },
+
+    startOrResume: async (exa_cod: string) => {
+        return apiClient(`/exams/${exa_cod}/start_or_resume/`, {
+            method: 'GET'
+        });
+    },
+
+    saveProgress: async (exa_cod: string, int_cod: string, respuestas: any[]) => {
+        return apiClient(`/exams/${exa_cod}/save_progress/`, {
+            method: 'POST',
+            body: JSON.stringify({ int_cod, respuestas }),
+            headers: { 'Content-Type': 'application/json' },
+        });
+    },
+
+    finishAttempt: async (exa_cod: string, int_cod: string) => {
+        return apiClient(`/exams/${exa_cod}/finish_attempt/`, {
+            method: 'POST',
+            body: JSON.stringify({ int_cod }),
+            headers: { 'Content-Type': 'application/json' },
+        });
+    },
+
+    updateExam: async (exa_cod: string, data: Partial<Exam>) => {
+        return apiClient(`/exams/${exa_cod}/`, {
             method: 'PATCH',
             body: JSON.stringify(data),
             headers: { 'Content-Type': 'application/json' },
         });
     },
 
-    deleteExam: async (id: number) => {
-        return apiClient(`/exams/${id}/`, {
+    deleteExam: async (exa_cod: string) => {
+        return apiClient(`/exams/${exa_cod}/`, {
             method: 'DELETE',
         });
     },
 
-    toggleEnabled: async (examId: number) => {
-        return apiClient(`/exams/${examId}/toggle_enabled/`, { method: 'POST' });
-    },
-
-    getStatsSummary: async () => {
-        return apiClient("/exams/stats_summary/");
-    },
-
-    getQuestions: async (examId: string) => {
-        return apiClient(`/exams/${examId}/questions/`);
-    },
-
-    getAllQuestions: async (examId: string | number) => {
-        return apiClient(`/exams/${examId}/all_questions/`);
+    // CRUD Questions
+    getAllQuestions: async (exa_cod: string): Promise<Question[]> => {
+        const res = await apiClient(`/exams/questions/?exa_cod=${exa_cod}`);
+        return res.json();
     },
 
     // CRUD Questions
-    createQuestion: async (examId: number, formData: FormData) => {
-        // We use FormData for image upload
-        return fetch(`${API_URL}/exams/questions/?exam_id=${examId}`, {
+    createQuestion: async (exa_cod: string, formData: FormData) => {
+        return fetch(`${API_URL}/exams/questions/?exa_cod=${exa_cod}`, {
             method: 'POST',
             headers: { ...getAuthHeader() },
             body: formData,
         });
     },
 
-    updateQuestion: async (questionId: number, formData: FormData) => {
-        return fetch(`${API_URL}/exams/questions/${questionId}/`, {
+    updateQuestion: async (pre_cod: string, formData: FormData) => {
+        return fetch(`${API_URL}/exams/questions/${pre_cod}/`, {
             method: 'PATCH',
             headers: { ...getAuthHeader() },
             body: formData,
         });
     },
 
-    deleteQuestion: async (questionId: number) => {
-        return apiClient(`/exams/questions/${questionId}/`, {
+    deleteQuestion: async (pre_cod: string) => {
+        return apiClient(`/exams/questions/${pre_cod}/`, {
             method: 'DELETE',
         });
     },
 
     // CRUD Options
-    createOption: async (questionId: number, data: Partial<Option>) => {
-        return apiClient(`/exams/options/?question_id=${questionId}`, {
+    createOption: async (pre_cod: string, data: Partial<ExamOption>) => {
+        return apiClient(`/exams/options/`, {
             method: 'POST',
-            body: JSON.stringify({ ...data, question: questionId }),
+            body: JSON.stringify({ ...data, pre_cod }),
             headers: { 'Content-Type': 'application/json' },
         });
     },
 
-    updateOption: async (optionId: number, data: Partial<Option>) => {
-        return apiClient(`/exams/options/${optionId}/`, {
+    updateOption: async (opc_cod: string, data: Partial<ExamOption>) => {
+        return apiClient(`/exams/options/${opc_cod}/`, {
             method: 'PATCH',
             body: JSON.stringify(data),
             headers: { 'Content-Type': 'application/json' },
         });
     },
 
-    deleteOption: async (optionId: number) => {
-        return apiClient(`/exams/options/${optionId}/`, {
+    deleteOption: async (opc_cod: string) => {
+        return apiClient(`/exams/options/${opc_cod}/`, {
             method: 'DELETE',
-        });
-    },
-
-    submitAnswers: async (attemptId: number, answers: any[]) => {
-        return apiClient(`/exams/attempts/${attemptId}/submit_answers/`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ answers }),
         });
     },
 
     getUserResults: async (search: string = "", offset: number = 0) => {
         return apiClient(`/exams/attempts/user_results/?search=${search}&offset=${offset}`);
-    },
-
-    exportResults: async (examId: number) => {
-        return apiClient(`/exams/${examId}/export_csv/`);
     },
 
     importExam: async (file: File) => {
@@ -156,12 +211,32 @@ export const examService = {
         });
     },
 
-    syncExam: async (examId: number, formData: FormData) => {
-        return fetch(`${API_URL}/exams/${examId}/sync/`, {
+    getExamConfig: async (exa_cod: string) => {
+        const res = await apiClient(`/exams/${exa_cod}/get_config/`);
+        return res.json();
+    },
+
+    bulkUpdateExam: async (exa_cod: string, data: any) => {
+        return apiClient(`/exams/${exa_cod}/bulk_save/`, {
             method: 'POST',
-            headers: { ...getAuthHeader() },
-            body: formData,
+            body: JSON.stringify(data),
+            headers: { 'Content-Type': 'application/json' },
         });
+    },
+
+    downloadTemplate: async () => {
+        const res = await fetch(`${API_URL}/exams/template/`, {
+            headers: { ...getAuthHeader() },
+        });
+        if (!res.ok) throw new Error("Error al descargar la plantilla");
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'plantilla_examen.xlsx';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
     },
 };
 

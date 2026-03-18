@@ -1,53 +1,37 @@
 import { useState, useEffect } from "react";
-import { examService, Exam, Question, Option } from "@/api/examService";
-import {
-    X, Save, Plus, Trash2, Image as ImageIcon,
-    Clock, CheckCircle, HelpCircle, ChevronDown,
-    ChevronUp, AlertCircle, Loader2, Eye
-} from "lucide-react";
+import { X, Save, Eye, Plus, Loader2, HelpCircle } from "lucide-react";
+import { examService, Exam, LocalQuestion, LocalOption, TipoPregunta } from "@/api/examService";
 import { toast } from "sonner";
 import AdminExamPreview from "./AdminExamPreview";
+import ExamConfig, { CategoryConfig } from "./ExamConfig";
+import QuestionCard from "./QuestionCard";
 
 interface ExamEditorProps {
-    examId: number;
+    exa_cod: string;
     onClose: () => void;
     onSaveSuccess?: () => void;
 }
 
-interface LocalOption extends Option {
-    isNew?: boolean;
-    isDirty?: boolean;
-    isDeleted?: boolean;
-}
-
-interface LocalQuestion extends Question {
-    options: LocalOption[];
-    isNew?: boolean;
-    isDirty?: boolean;
-    isDeleted?: boolean;
-    tempImageFile?: File;
-    tempImageUrl?: string;
-}
-
-const ExamEditor = ({ examId, onClose, onSaveSuccess }: ExamEditorProps) => {
+const ExamEditor = ({ exa_cod, onClose, onSaveSuccess }: ExamEditorProps) => {
     const [exam, setExam] = useState<Exam | null>(null);
     const [questions, setQuestions] = useState<LocalQuestion[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [expandedQuestion, setExpandedQuestion] = useState<number | null>(null);
+    const [expandedQuestion, setExpandedQuestion] = useState<string | null>(null);
     const [showPreview, setShowPreview] = useState(false);
     const [hasChanges, setHasChanges] = useState(false);
+    const [config, setConfig] = useState<CategoryConfig[]>([]);
+    const [allCompetencies, setAllCompetencies] = useState<Competencia[]>([]);
+    const [tipoPreguntas, setTipoPreguntas] = useState<TipoPregunta[]>([]);
 
     useEffect(() => {
         fetchExamData();
-    }, [examId]);
+    }, [exa_cod]);
 
-    // Check for changes
     useEffect(() => {
         const changed = questions.some(q => q.isDirty || q.isNew || q.isDeleted || q.options.some(o => o.isDirty || o.isNew || o.isDeleted));
         setHasChanges(changed);
 
-        // Prevent window close if changes exist
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
             if (changed) {
                 e.preventDefault();
@@ -61,22 +45,25 @@ const ExamEditor = ({ examId, onClose, onSaveSuccess }: ExamEditorProps) => {
     const fetchExamData = async () => {
         setLoading(true);
         try {
-            const [examRes, questionsRes] = await Promise.all([
+            const [examsRes, tiposRes, compsRes] = await Promise.all([
                 examService.getExams(),
-                examService.getAllQuestions(examId)
+                examService.getTipoPreguntas(),
+                examService.getCompetencias()
             ]);
+            setTipoPreguntas(tiposRes);
+            setAllCompetencies(compsRes);
+            
+            const currentExam = examsRes.find((e: Exam) => e.exa_cod === exa_cod);
+            setExam(currentExam || null);
 
-            if (examRes.ok) {
-                const exams = await examRes.json();
-                const currentExam = exams.find((e: Exam) => e.id === examId);
-                setExam(currentExam || null);
-            }
-
-            if (questionsRes.ok) {
-                const qData = await questionsRes.json();
-                setQuestions(qData.questions.map((q: any) => ({
+            if (currentExam) {
+                const questionsRes = await examService.getAllQuestions(currentExam.exa_cod);
+                // La API de DRF devuelve un array directamente, no un objeto {questions: []}
+                const questionsData = Array.isArray(questionsRes) ? questionsRes : ((questionsRes as any).questions || []);
+                
+                setQuestions(questionsData.map((q: any) => ({
                     ...q,
-                    options: q.options.map((o: any) => ({ ...o }))
+                    options: (q.options || q.opciones || []).map((o: any) => ({ ...o }))
                 })));
             }
         } catch (error) {
@@ -87,83 +74,211 @@ const ExamEditor = ({ examId, onClose, onSaveSuccess }: ExamEditorProps) => {
         }
     };
 
-    const getImageUrl = (q: LocalQuestion) => {
-        if (q.tempImageUrl) return q.tempImageUrl;
-        if (!q.image) return null;
-        if (q.image.startsWith('http')) return q.image;
-        const baseUrl = import.meta.env.VITE_API_URL?.replace('/api', '');
-        return `${baseUrl}${q.image}`;
-    };
 
     const handleSaveEverything = async () => {
         if (!exam) return;
         setSaving(true);
         try {
-            const formData = new FormData();
-
-            // Prepare the full state for JSON serialization
-            // We include everything: exam metadata and questions (with options)
-            const syncData = {
-                ...exam,
+            // Recolectamos toda la información para enviarla de una sola vez
+            // No filtramos localmente para asegurar sincronización completa como pidió el usuario
+            const payload = {
+                exa_nom: exam.exa_nom,
+                exa_des: exam.exa_des,
                 questions: questions.map(q => ({
-                    ...q,
-                    // Keep the tempImageUrl for local reference if needed, 
-                    // though the backend doesn't need it.
-                    options: q.options
-                }))
+                    pre_cod: q.pre_cod,
+                    pre_tex: q.pre_tex,
+                    pre_pun: q.pre_pun,
+                    pre_tie: q.pre_tie,
+                    pre_fot: q.pre_fot,
+                    tip_pre_cod: q.tip_pre_cod || 1,
+                    com_cod: q.com_cod,
+                    isNew: q.isNew,
+                    isDirty: q.isDirty,
+                    isDeleted: q.isDeleted,
+                    options: q.options.map(o => ({
+                        opc_cod: o.opc_cod,
+                        opc_tex: o.opc_tex,
+                        opc_cor: o.opc_cor,
+                        isNew: o.isNew,
+                        isDirty: o.isDirty,
+                        isDeleted: o.isDeleted,
+                    }))
+                })),
+                config: config
             };
 
-            formData.append('data', JSON.stringify(syncData));
-
-            // Append all new image files with a predictable key
-            questions.forEach(q => {
-                if (q.tempImageFile) {
-                    formData.append(`image_q_${q.id}`, q.tempImageFile);
+            // VALIDACIÓN: Verificar si hay suficientes preguntas por competencia
+            const activeQuestions = questions.filter(q => !q.isDeleted);
+            const countsPerComp: Record<string, number> = {};
+            activeQuestions.forEach(q => {
+                if (q.com_cod) {
+                    countsPerComp[q.com_cod] = (countsPerComp[q.com_cod] || 0) + 1;
                 }
             });
 
-            const res = await examService.syncExam(exam.id, formData);
+            const validationErrors: string[] = [];
+            config.forEach(cc => {
+                cc.competencies.forEach(comp => {
+                    const available = countsPerComp[comp.com_cod] || 0;
+                    if (available < comp.num_preguntas) {
+                        const compName = allCompetencies.find(c => c.com_cod === comp.com_cod)?.com_nom || comp.com_cod;
+                        validationErrors.push(`Faltan preguntas para "${compName}": se requieren ${comp.num_preguntas} y hay ${available}.`);
+                    }
+                });
+            });
 
-            if (res.ok) {
-                toast.success("Examen sincronizado correctamente");
-                setHasChanges(false);
-                await fetchExamData(); // Reload to get fresh IDs and clean states
-                onSaveSuccess?.();
-            } else {
-                const errorData = await res.json();
-                toast.error(errorData.error || "Error al sincronizar el examen");
+            if (validationErrors.length > 0) {
+                validationErrors.forEach(err => toast.error(err, { duration: 5000 }));
+                if (!confirm("Atención: Hay discrepancias en la cantidad de preguntas requeridas por competencia. ¿Deseas guardar de todos modos?")) {
+                    setSaving(false);
+                    return;
+                }
             }
+
+            const res = await examService.bulkUpdateExam(exam.exa_cod, payload);
+            if (!res.ok) throw new Error("Error en el guardado masivo");
+
+            const updateData = await res.json();
+            
+            // 2. Procesar imágenes pendientes (solo si hay archivos temporales)
+            // Creamos un mapa de las preguntas actualizadas del servidor para facilitar la búsqueda
+            // El servidor devuelve el estado completo de las preguntas del examen
+            const serverQuestions = updateData.questions || [];
+            
+            const questionsWithImages = questions.filter(q => q.tempImageFile && !q.isDeleted);
+            const imageUpdateMap: Record<string, string> = {};
+
+            if (questionsWithImages.length > 0) {
+                toast.loading("Subiendo imágenes...", { id: "img-upload" });
+                for (const localQ of questionsWithImages) {
+                    // Buscar la pregunta en la respuesta del servidor (por texto o código original)
+                    const serverQ = serverQuestions.find((sq: any) => 
+                        sq.pre_tex === localQ.pre_tex && 
+                        (localQ.isNew ? true : sq.pre_cod === localQ.pre_cod)
+                    );
+
+                    if (serverQ && localQ.tempImageFile) {
+                        const formData = new FormData();
+                        formData.append('pre_fot', localQ.tempImageFile);
+                        const imgRes = await examService.updateQuestion(serverQ.pre_cod, formData);
+                        if (imgRes.ok) {
+                            const updatedQ = await imgRes.json();
+                            imageUpdateMap[serverQ.pre_cod] = updatedQ.pre_fot;
+                        }
+                    }
+                }
+                toast.dismiss("img-upload");
+            }
+
+            // 3. Sincronización Silenciosa del Estado
+            // En lugar de recargar todo, mapeamos los IDs del servidor al estado local
+            setQuestions(prev => {
+                // Filtramos las borradas antes de sincronizar
+                const remaining = prev.filter(q => !q.isDeleted);
+                
+                return remaining.map((localQ, idx) => {
+                    // Buscamos la data fresca del servidor para esta posición/pregunta
+                    const serverQ = serverQuestions.find((sq: any) => 
+                        sq.pre_tex === localQ.pre_tex && 
+                        (localQ.isNew ? true : sq.pre_cod === localQ.pre_cod)
+                    );
+
+                    if (!serverQ) return localQ;
+
+                    // Si subimos imagen, usamos la ruta que devolvió el upload individual
+                    const freshPreFot = imageUpdateMap[serverQ.pre_cod] || serverQ.pre_fot;
+
+                    return {
+                        ...serverQ,
+                        pre_fot: freshPreFot,
+                        // Limpiamos estados temporales
+                        isNew: false,
+                        isDirty: false,
+                        isDeleted: false,
+                        tempImageFile: undefined,
+                        tempImageUrl: undefined,
+                        // Sincronizar opciones (especialmente IDs de nuevas opciones)
+                        options: (serverQ.options || serverQ.opciones || []).map((so: any) => ({
+                            ...so,
+                            isNew: false,
+                            isDirty: false,
+                            isDeleted: false
+                        }))
+                    };
+                });
+            });
+
+            toast.success("Todo guardado correctamente");
+            setHasChanges(false);
+            onSaveSuccess?.();
         } catch (error) {
-            console.error("Sync error:", error);
-            toast.error("Error crítico al guardar los cambios");
+            console.error("Bulk save error:", error);
+            toast.error("Ocurrió un error al guardar los cambios masivos");
         } finally {
             setSaving(false);
         }
     };
 
     const handleAddQuestion = () => {
+        // Try to find Multiple Choice type (usually cod 1)
+        const defaultType = tipoPreguntas.find(tp => tp.tip_pre_nom.toLowerCase().includes('múltiple') || tp.tip_pre_nom.toLowerCase().includes('multiple'))?.tip_pre_cod 
+                           || (tipoPreguntas.length > 0 ? tipoPreguntas[0].tip_pre_cod : 1);
+
         const newQ: LocalQuestion = {
-            id: Math.random(), // Temporary ID
-            text: "Nueva Pregunta",
-            question_type: "single_choice",
-            points: 10,
-            time_limit_seconds: 60,
-            image: null,
+            pre_cod: `NEW_${Math.random()}`,
+            pre_tex: "Nueva Pregunta",
+            pre_fot: null,
+            pre_pun: 10,
+            pre_tie: 60,
+            tip_pre_cod: defaultType,
             options: [],
             isNew: true
         };
+
+        // If it happens to start as T/F (cod 4), init options
+        if (defaultType === 4) {
+            newQ.options = [
+                { opc_cod: `OPT_TF_V_${Math.random()}`, opc_tex: 'Verdadero', opc_cor: true, isNew: true },
+                { opc_cod: `OPT_TF_F_${Math.random()}`, opc_tex: 'Falso', opc_cor: false, isNew: true }
+            ];
+        }
+
         setQuestions([...questions, newQ]);
-        setExpandedQuestion(newQ.id);
+        setExpandedQuestion(newQ.pre_cod);
     };
 
-    const handleDeleteQuestion = (qId: number) => {
-        setQuestions(questions.map(q => q.id === qId ? { ...q, isDeleted: true } : q));
+    const handleDeleteQuestion = (pre_cod: string) => {
+        setQuestions(questions.map(q => q.pre_cod === pre_cod ? { ...q, isDeleted: true } : q));
     };
 
-    const handleUpdateQuestion = (qId: number, data: Partial<LocalQuestion>, file?: File) => {
+    const handleUpdateQuestion = (pre_cod: string, data: Partial<LocalQuestion>, file?: File) => {
         setQuestions(questions.map(q => {
-            if (q.id === qId) {
-                const updated = { ...q, ...data, isDirty: true };
+            if (q.pre_cod === pre_cod) {
+                let updated = { ...q, ...data, isDirty: true };
+
+                // Smart Type Switching Logic
+                if (data.tip_pre_cod !== undefined && data.tip_pre_cod !== q.tip_pre_cod) {
+                    const oldType = q.tip_pre_cod;
+                    const newType = data.tip_pre_cod;
+
+                    // If moving TO or FROM T/F (4), we should probably reset options to avoid mess
+                    if (newType === 4 || oldType === 4) {
+                        if (newType === 4) {
+                            updated.options = [
+                                { opc_cod: `OPT_TF_V_${Math.random()}`, opc_tex: 'Verdadero', opc_cor: true, isNew: true },
+                                { opc_cod: `OPT_TF_F_${Math.random()}`, opc_tex: 'Falso', opc_cor: false, isNew: true }
+                            ];
+                        } else {
+                            // If moving away from T/F, just clear options
+                            updated.options = [];
+                        }
+                    } 
+                    // If moving TO Relationship (3), mark all as correct
+                    else if (newType === 3) {
+                        updated.options = updated.options.map(o => ({ ...o, opc_cor: true }));
+                    }
+                }
+
                 if (file) {
                     updated.tempImageFile = file;
                     updated.tempImageUrl = URL.createObjectURL(file);
@@ -174,13 +289,13 @@ const ExamEditor = ({ examId, onClose, onSaveSuccess }: ExamEditorProps) => {
         }));
     };
 
-    const handleAddOption = (qId: number) => {
+    const handleAddOption = (pre_cod: string) => {
         setQuestions(questions.map(q => {
-            if (q.id === qId) {
+            if (q.pre_cod === pre_cod) {
                 const newOpt: LocalOption = {
-                    id: Math.random(),
-                    text: 'Nueva opción',
-                    is_correct: false,
+                    opc_cod: `OPT_NEW_${Math.random()}`,
+                    opc_tex: q.tip_pre_cod === 3 ? 'A | B' : 'Nueva opción',
+                    opc_cor: q.tip_pre_cod === 3 ? true : false,
                     isNew: true
                 };
                 return { ...q, options: [...q.options, newOpt] };
@@ -189,24 +304,24 @@ const ExamEditor = ({ examId, onClose, onSaveSuccess }: ExamEditorProps) => {
         }));
     };
 
-    const handleUpdateOption = (qId: number, optId: number, data: Partial<LocalOption>) => {
+    const handleUpdateOption = (pre_cod: string, opc_cod: string, data: Partial<LocalOption>) => {
         setQuestions(questions.map(q => {
-            if (q.id === qId) {
+            if (q.pre_cod === pre_cod) {
                 return {
                     ...q,
-                    options: q.options.map(o => o.id === optId ? { ...o, ...data, isDirty: true } : o)
+                    options: q.options.map(o => o.opc_cod === opc_cod ? { ...o, ...data, isDirty: true } : o)
                 };
             }
             return q;
         }));
     };
 
-    const handleDeleteOption = (qId: number, optId: number) => {
+    const handleDeleteOption = (pre_cod: string, opc_cod: string) => {
         setQuestions(questions.map(q => {
-            if (q.id === qId) {
+            if (q.pre_cod === pre_cod) {
                 return {
                     ...q,
-                    options: q.options.map(o => o.id === optId ? { ...o, isDeleted: true } : o)
+                    options: q.options.map(o => o.opc_cod === opc_cod ? { ...o, isDeleted: true } : o)
                 };
             }
             return q;
@@ -241,7 +356,7 @@ const ExamEditor = ({ examId, onClose, onSaveSuccess }: ExamEditorProps) => {
                     </button>
                     <div>
                         <h2 className="text-xl md:text-2xl font-black text-white tracking-tight">Editor de Evaluación</h2>
-                        <p className="text-white/40 text-[10px] uppercase font-black tracking-widest">ID: {examId} {hasChanges && <span className="text-amber-400 ml-2">(Cambios sin guardar)</span>}</p>
+                        <p className="text-white/40 text-[10px] uppercase font-black tracking-widest">CÓDIGO: {exa_cod} {hasChanges && <span className="text-amber-400 ml-2">(Cambios sin guardar)</span>}</p>
                     </div>
                 </div>
                 <div className="flex gap-4">
@@ -266,93 +381,51 @@ const ExamEditor = ({ examId, onClose, onSaveSuccess }: ExamEditorProps) => {
             {/* Modal de Vista Previa */}
             {showPreview && exam && (
                 <AdminExamPreview
-                    examId={examId}
-                    examName={exam.name}
+                    exa_cod={exa_cod}
+                    exa_nom={exam.exa_nom}
                     onClose={() => setShowPreview(false)}
                 />
             )}
 
             <div className="max-w-5xl mx-auto w-full p-4 md:p-8 space-y-8 flex-1">
+
                 {/* Exam Settings Card */}
                 <section className="bg-white/5 border border-white/10 rounded-3xl p-6 md:p-8 space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-2">
-                            <label className="text-[10px] font-black text-white/40 uppercase tracking-widest ml-1">Nombre del Examen</label>
-                            <input
-                                type="text"
-                                value={exam?.name || ""}
-                                onChange={(e) => setExam(exam ? { ...exam, name: e.target.value } : null)}
-                                className="w-full bg-white/5 border border-white/20 rounded-2xl py-3 px-4 text-white focus:outline-none focus:ring-2 focus:ring-white/20 font-bold"
-                            />
-                        </div>
-                        <div className="flex items-end pb-1">
-                            <label className="flex items-center gap-3 cursor-pointer group bg-white/5 hover:bg-white/10 p-3 rounded-2xl border border-white/10 transition-all w-full md:w-fit">
-                                <div className={`h-6 w-11 rounded-full p-1 transition-colors ${exam?.is_timed ? 'bg-emerald-500' : 'bg-slate-600'}`}>
-                                    <div className={`h-4 w-4 bg-white rounded-full transition-transform ${exam?.is_timed ? 'translate-x-5' : 'translate-x-0'}`} />
-                                </div>
-                                <div className="flex flex-col text-left">
-                                    <span className="text-white font-bold text-sm">Examen Contrareloj</span>
-                                    <span className="text-[10px] text-white/40 font-black uppercase tracking-widest">Activar cronómetro</span>
-                                </div>
-                                <input
-                                    type="checkbox"
-                                    className="hidden"
-                                    checked={exam?.is_timed}
-                                    onChange={(e) => setExam(exam ? { ...exam, is_timed: e.target.checked } : null)}
-                                />
-                            </label>
-                        </div>
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-white/40 uppercase tracking-widest ml-1">Nombre del Examen</label>
+                        <input
+                            type="text"
+                            value={exam?.exa_nom || ""}
+                            onChange={(e) => setExam(exam ? { ...exam, exa_nom: e.target.value } : null)}
+                            className="w-full bg-white/5 border border-white/20 rounded-2xl py-3 px-4 text-white focus:outline-none focus:ring-2 focus:ring-white/20 font-bold"
+                        />
                     </div>
 
                     <div className="space-y-2">
                         <label className="text-[10px] font-black text-white/40 uppercase tracking-widest ml-1">Descripción</label>
                         <textarea
                             rows={3}
-                            value={exam?.description || ""}
-                            onChange={(e) => setExam(exam ? { ...exam, description: e.target.value } : null)}
+                            value={exam?.exa_des || ""}
+                            onChange={(e) => setExam(exam ? { ...exam, exa_des: e.target.value } : null)}
                             className="w-full bg-white/5 border border-white/20 rounded-2xl py-3 px-4 text-white focus:outline-none focus:ring-2 focus:ring-white/20 font-medium"
                         />
                     </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div className="space-y-2">
-                            <label className="text-[9px] font-black text-white/40 uppercase tracking-[0.15em] ml-1">Preguntas/Intento</label>
-                            <input
-                                type="number"
-                                value={exam?.questions_per_attempt || 0}
-                                onChange={(e) => setExam(exam ? { ...exam, questions_per_attempt: parseInt(e.target.value) } : null)}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl py-2 px-3 text-white text-sm"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-[9px] font-black text-white/40 uppercase tracking-[0.15em] ml-1">Intentos Permitidos</label>
-                            <input
-                                type="number"
-                                value={exam?.max_scored_attempts || 0}
-                                onChange={(e) => setExam(exam ? { ...exam, max_scored_attempts: parseInt(e.target.value) } : null)}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl py-2 px-3 text-white text-sm"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-[9px] font-black text-white/40 uppercase tracking-[0.15em] ml-1">Puntaje Máximo</label>
-                            <input
-                                type="number"
-                                value={exam?.max_points || 0}
-                                onChange={(e) => setExam(exam ? { ...exam, max_points: parseInt(e.target.value) } : null)}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl py-2 px-3 text-white text-sm"
-                            />
-                        </div>
-                        <div className="flex items-center gap-3 justify-center bg-white/5 rounded-xl border border-white/10 mt-5">
-                            <HelpCircle size={16} className="text-white/40" />
-                            <span className="text-[10px] text-white/60 font-black uppercase tracking-widest">{questions.length} PREGUNTAS TOTAL</span>
-                        </div>
-                    </div>
                 </section>
+
+                {/* NEW CONFIG SECTION */}
+                <ExamConfig 
+                    exa_cod={exa_cod} 
+                    allCompetencies={allCompetencies}
+                    onConfigChange={(newConfig) => {
+                        setConfig(newConfig);
+                        setHasChanges(true);
+                    }} 
+                />
 
                 {/* Questions Section */}
                 <div className="space-y-6">
                     <div className="flex justify-between items-center px-2">
-                        <h3 className="text-lg md:text-xl font-black text-white uppercase tracking-[0.2em]">Cuestionario</h3>
+                        <h3 className="text-lg md:text-xl font-black text-white uppercase tracking-[0.2em]">Talonario de Preguntas</h3>
                         <button
                             onClick={handleAddQuestion}
                             className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl border border-white/20 transition-all text-[10px] font-black uppercase tracking-widest"
@@ -364,190 +437,39 @@ const ExamEditor = ({ examId, onClose, onSaveSuccess }: ExamEditorProps) => {
 
                     <div className="space-y-4 pb-20">
                         {questions.filter(q => !q.isDeleted).map((q, idx) => (
-                            <div key={q.id} className="bg-white rounded-3xl overflow-hidden shadow-2xl transition-all border border-white/10">
-                                {/* Question Header */}
-                                <div
-                                    className="p-4 md:p-6 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"
-                                    onClick={() => setExpandedQuestion(expandedQuestion === q.id ? null : q.id)}
-                                >
-                                    <div className="flex items-center gap-4">
-                                        <div className="bg-[#001c4d] text-white h-8 w-8 rounded-xl flex items-center justify-center font-black text-xs shadow-md">
-                                            {idx + 1}
-                                        </div>
-                                        <div>
-                                            <p className="font-bold text-[#001c4d] truncate max-w-[200px] md:max-w-md">{q.text}</p>
-                                            <div className="flex gap-3 items-center mt-1">
-                                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">{q.question_type}</span>
-                                                <span className="text-[9px] font-black uppercase tracking-widest text-[#001c4d]/60">{q.points} pts</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); handleDeleteQuestion(q.id); }}
-                                            className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                        >
-                                            <Trash2 size={18} />
-                                        </button>
-                                        {expandedQuestion === q.id ? <ChevronUp className="text-[#001c4d]/40" /> : <ChevronDown className="text-[#001c4d]/40" />}
-                                    </div>
-                                </div>
-
-                                {/* Expanded Content */}
-                                {expandedQuestion === q.id && (
-                                    <div className="p-4 md:p-8 border-t border-slate-100 bg-slate-50/50 space-y-8 animate-in slide-in-from-top-4">
-                                        <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-                                            {/* Left: Metadata */}
-                                            <div className="md:col-span-8 space-y-6">
-                                                <div className="space-y-2">
-                                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Enunciado de la pregunta</label>
-                                                    <textarea
-                                                        value={q.text}
-                                                        onChange={(e) => handleUpdateQuestion(q.id, { text: e.target.value })}
-                                                        rows={2}
-                                                        className="w-full bg-white border border-slate-200 rounded-2xl py-3 px-4 text-[#001c4d] focus:ring-2 focus:ring-[#001c4d]/20 focus:outline-none font-bold"
-                                                    />
-                                                </div>
-
-                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                                    <div className="space-y-2">
-                                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tipo</label>
-                                                        <select
-                                                            value={q.question_type}
-                                                            onChange={(e) => handleUpdateQuestion(q.id, { question_type: e.target.value as any })}
-                                                            className="w-full bg-white border border-slate-200 rounded-xl py-2.5 px-3 text-[#001c4d] text-sm font-bold"
-                                                        >
-                                                            <option value="single_choice">Opción Única</option>
-                                                            <option value="multiple_choice">Opción Múltiple</option>
-                                                            <option value="open_ended">Respuesta Abierta (Opinión)</option>
-                                                        </select>
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Puntos</label>
-                                                        <input
-                                                            type="number"
-                                                            value={q.points}
-                                                            onChange={(e) => handleUpdateQuestion(q.id, { points: parseInt(e.target.value) || 0 })}
-                                                            className="w-full bg-white border border-slate-200 rounded-xl py-2.5 px-3 text-[#001c4d] text-sm font-bold"
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tiempo (s)</label>
-                                                        <div className="relative">
-                                                            <Clock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                                                            <input
-                                                                type="number"
-                                                                disabled={!exam?.is_timed}
-                                                                value={q.time_limit_seconds}
-                                                                onChange={(e) => handleUpdateQuestion(q.id, { time_limit_seconds: parseInt(e.target.value) || 0 })}
-                                                                className="w-full bg-white border border-slate-200 rounded-xl py-2.5 pl-9 pr-3 text-[#001c4d] text-sm font-bold disabled:opacity-40"
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {/* Right: Image Upload */}
-                                            <div className="md:col-span-4 space-y-2">
-                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Guía Visual (Opcional)</label>
-                                                <div className="relative aspect-video rounded-2xl border-2 border-dashed border-slate-200 bg-white flex flex-col items-center justify-center overflow-hidden group">
-                                                    {getImageUrl(q) ? (
-                                                        <>
-                                                            <img src={getImageUrl(q)!} alt="Guia" className="w-full h-full object-cover" />
-                                                            <div className="absolute inset-0 bg-[#001c4d]/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                <label className="bg-white text-[#001c4d] px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest cursor-pointer">Cambiar Foto</label>
-                                                            </div>
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <ImageIcon className="h-8 w-8 text-slate-300 mb-2" />
-                                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Subir Imagen</span>
-                                                        </>
-                                                    )}
-                                                    <input
-                                                        type="file"
-                                                        accept="image/*"
-                                                        className="absolute inset-0 opacity-0 cursor-pointer"
-                                                        onChange={(e) => {
-                                                            const file = e.target.files?.[0];
-                                                            if (file) handleUpdateQuestion(q.id, {}, file);
-                                                        }}
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {/* Answers Section */}
-                                        <div className="space-y-4">
-                                            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-                                                <h4 className="text-[11px] font-black text-[#001c4d] uppercase tracking-widest">Opciones de Respuesta</h4>
-                                                {q.question_type !== 'open_ended' && (
-                                                    <button
-                                                        onClick={() => handleAddOption(q.id)}
-                                                        className="flex items-center gap-1 text-[#001c4d] hover:bg-[#001c4d]/5 px-3 py-1 rounded-lg transition-all text-[10px] font-black uppercase tracking-widest border border-slate-200"
-                                                    >
-                                                        <Plus size={14} />
-                                                        Añadir Opción
-                                                    </button>
-                                                )}
-                                            </div>
-
-                                            {q.question_type === 'open_ended' ? (
-                                                <div className="p-8 bg-blue-50 border border-blue-100 rounded-3xl flex items-center gap-4">
-                                                    <div className="h-10 w-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center flex-shrink-0">
-                                                        <AlertCircle />
-                                                    </div>
-                                                    <p className="text-sm font-medium text-blue-900 leading-relaxed">
-                                                        <strong>Modo Respuesta Abierta:</strong> El sistema mostrará un cuadro de texto al analista.
-                                                        Cualquier respuesta escrita será calificada como válida para efectos de flujo, ideal para encuestas u opiniones.
-                                                    </p>
-                                                </div>
-                                            ) : (
-                                                <div className="grid grid-cols-1 gap-3">
-                                                    {q.options.filter(o => !o.isDeleted).map((opt, oIdx) => (
-                                                        <div key={opt.id} className={`group flex items-center gap-3 p-3 rounded-2xl border transition-all ${opt.is_correct ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-100 hover:border-slate-300'}`}>
-                                                            {/* IsCorrect Toggle */}
-                                                            <button
-                                                                onClick={() => {
-                                                                    if (q.question_type === 'single_choice' && !opt.is_correct) {
-                                                                        q.options.forEach(o => {
-                                                                            if (o.is_correct) handleUpdateOption(q.id, o.id, { is_correct: false });
-                                                                        });
-                                                                    }
-                                                                    handleUpdateOption(q.id, opt.id, { is_correct: !opt.is_correct });
-                                                                }}
-                                                                className={`h-8 w-8 rounded-full flex items-center justify-center transition-all ${opt.is_correct ? 'bg-emerald-500 text-white shadow-lg' : 'bg-slate-100 text-slate-400 group-hover:bg-slate-200'}`}
-                                                            >
-                                                                <CheckCircle size={18} />
-                                                            </button>
-
-                                                            {/* Option Text */}
-                                                            <input
-                                                                type="text"
-                                                                value={opt.text}
-                                                                onChange={(e) => handleUpdateOption(q.id, opt.id, { text: e.target.value })}
-                                                                className={`flex-1 bg-transparent border-none focus:ring-0 text-sm font-bold ${opt.is_correct ? 'text-emerald-900' : 'text-[#001c4d]'}`}
-                                                            />
-
-                                                            {/* Delete Option */}
-                                                            <button
-                                                                onClick={() => handleDeleteOption(q.id, opt.id)}
-                                                                className="opacity-0 group-hover:opacity-100 p-2 text-slate-400 hover:text-red-500 transition-all"
-                                                            >
-                                                                <Trash2 size={16} />
-                                                            </button>
-                                                        </div>
-                                                    ))}
-                                                    {q.options.filter(o => !o.isDeleted).length === 0 && (
-                                                        <div className="py-6 text-center opacity-40 italic text-xs">Sin opciones registradas.</div>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
+                            <QuestionCard
+                                key={q.pre_cod}
+                                question={q}
+                                index={idx}
+                                isExpanded={expandedQuestion === q.pre_cod}
+                                tipoPreguntas={tipoPreguntas}
+                                allCompetencies={allCompetencies}
+                                onToggleExpand={() => setExpandedQuestion(expandedQuestion === q.pre_cod ? null : q.pre_cod)}
+                                onDeleteQuestion={() => handleDeleteQuestion(q.pre_cod)}
+                                onUpdateQuestion={(data, file) => handleUpdateQuestion(q.pre_cod, data, file)}
+                                onUpdateOption={(opc_cod, data) => handleUpdateOption(q.pre_cod, opc_cod, data)}
+                                onDeleteOption={(opc_cod) => handleDeleteOption(q.pre_cod, opc_cod)}
+                                onToggleCorrect={(opc_cod) => {
+                                    // For T/F, ensure only one is correct
+                                    if (q.tip_pre_cod === 4) {
+                                        setQuestions(questions.map(qus => qus.pre_cod === q.pre_cod ? {
+                                            ...qus,
+                                            options: qus.options.map(o => ({ ...o, opc_cor: o.opc_cod === opc_cod }))
+                                        } : qus));
+                                    } else {
+                                        handleUpdateOption(q.pre_cod, opc_cod, { opc_cor: !q.options.find(o => o.opc_cod === opc_cod)?.opc_cor });
+                                    }
+                                }}
+                                onAddOption={() => handleAddOption(q.pre_cod)}
+                            />
                         ))}
+                        {questions.filter(q => !q.isDeleted).length === 0 && (
+                            <div className="py-20 text-center bg-white/5 rounded-[40px] border-2 border-dashed border-white/10">
+                                <HelpCircle className="h-12 w-12 text-white/20 mx-auto mb-4" />
+                                <p className="text-white/60 font-black uppercase tracking-[0.2em] text-sm">No hay preguntas añadidas</p>
+                                <p className="text-white/20 text-[10px] uppercase font-bold mt-2">Haz clic en "Añadir Pregunta" para comenzar</p>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>

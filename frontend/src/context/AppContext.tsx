@@ -40,10 +40,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const fetchExams = async () => {
     try {
-      const response = await examService.getExams();
-      if (response.ok) {
-        const data = await response.json();
+      const data = await examService.getExams();
+      if (Array.isArray(data)) {
         setExams(data);
+      } else {
+        console.error("Exams data is not an array:", data);
+        setExams([]);
       }
     } catch (error) {
       console.error("Error fetching exams:", error);
@@ -53,11 +55,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const fetchUserScore = async () => {
     if (!user) return;
     try {
-      const response = await userService.getUserScore(user.id);
-      if (response.ok) {
+      const response = await userService.getUserScore(user.usu_cod);
+      if (response && response.ok) {
         const data = await response.json();
-        setUser(data);
-        localStorage.setItem("user", JSON.stringify(data));
+        const updatedUser = { ...user, ...data };
+        setUser(updatedUser);
+        localStorage.setItem("user", JSON.stringify(updatedUser));
       }
     } catch (error) {
       console.error("Error fetching user score:", error);
@@ -69,7 +72,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     try {
       const response = await userService.login(username, dni);
 
-      if (response.ok) {
+      if (response && response.ok) {
         const data = await response.json();
         setUser(data);
         setIsAuthenticated(true);

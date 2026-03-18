@@ -44,7 +44,7 @@ const RankingPage = () => {
 
     const podium = data?.top_users.slice(0, 3) || [];
     const others = data?.top_users.slice(3) || [];
-    const isUserInTop13 = data?.top_users.some(u => u.id === currentUser?.id);
+    const isUserInTop13 = data?.top_users.some(u => u.usu_cod === currentUser?.usu_cod);
 
     return (
         <div className="min-h-screen bg-[#f8fafc] text-slate-900 flex flex-col relative">
@@ -75,9 +75,9 @@ const RankingPage = () => {
                         <div className="flex flex-col items-center order-2 md:order-1 scale-90 md:scale-95 origin-bottom">
                             <div className="relative mb-4">
                                 <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-slate-200 border-4 border-slate-300 flex items-center justify-center shadow-xl overflow-hidden">
-                                    {podium[1].profile_image ? (
-                                        <img src={podium[1].profile_image} alt={podium[1].username} className="w-full h-full object-cover" />
-                                    ) : (podium[1].id === currentUser?.id) ? (
+                                    {podium[1].usu_fot ? (
+                                        <img src={podium[1].usu_fot} alt={podium[1].username} className="w-full h-full object-cover" />
+                                    ) : (podium[1].usu_cod === currentUser?.usu_cod) ? (
                                         <img src={profilePic} alt={podium[1].username} className="w-full h-full object-cover" />
                                     ) : (
                                         <UserIcon className="h-10 w-10 sm:h-12 sm:w-12 text-slate-400" />
@@ -90,7 +90,7 @@ const RankingPage = () => {
                             <div className="text-center">
                                 <p className="font-bold text-slate-800 text-base sm:text-lg">@{podium[1].username}</p>
                                 <div className="bg-slate-200 text-slate-600 px-2 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-black mt-1">
-                                    {podium[1].total_score} pts
+                                    {podium[1].usu_pun_tot} pts
                                 </div>
                             </div>
                             <div className="h-16 sm:h-24 w-full bg-slate-300 rounded-t-2xl mt-4 shadow-inner flex items-center justify-center">
@@ -107,9 +107,9 @@ const RankingPage = () => {
                                     <Crown className="h-8 w-8 sm:h-10 sm:w-10 fill-amber-500" />
                                 </div>
                                 <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-full bg-amber-100 border-4 border-amber-400 flex items-center justify-center shadow-2xl overflow-hidden ring-4 ring-amber-400/20">
-                                    {podium[0].profile_image ? (
-                                        <img src={podium[0].profile_image} alt={podium[0].username} className="w-full h-full object-cover" />
-                                    ) : (podium[0].id === currentUser?.id) ? (
+                                    {podium[0].usu_fot ? (
+                                        <img src={podium[0].usu_fot} alt={podium[0].username} className="w-full h-full object-cover" />
+                                    ) : (podium[0].usu_cod === currentUser?.usu_cod) ? (
                                         <img src={profilePic} alt={podium[0].username} className="w-full h-full object-cover" />
                                     ) : (
                                         <UserIcon className="h-14 w-14 sm:h-16 sm:w-16 text-amber-500" />
@@ -122,7 +122,7 @@ const RankingPage = () => {
                             <div className="text-center">
                                 <p className="font-black text-[#001c4d] text-lg sm:text-xl">@{podium[0].username}</p>
                                 <div className="bg-amber-400 text-[#001c4d] px-3 sm:px-4 py-1.5 rounded-full text-sm font-black mt-1 shadow-lg shadow-amber-200">
-                                    {podium[0].total_score} pts
+                                    {podium[0].usu_pun_tot} pts
                                 </div>
                             </div>
                             <div className="h-24 sm:h-32 w-full bg-[#001c4d] rounded-t-2xl mt-4 shadow-2xl flex items-center justify-center">
@@ -136,9 +136,9 @@ const RankingPage = () => {
                         <div className="flex flex-col items-center order-3 md:order-3 scale-90 md:scale-95 origin-bottom">
                             <div className="relative mb-4">
                                 <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-orange-100 border-4 border-orange-300 flex items-center justify-center shadow-xl overflow-hidden">
-                                    {podium[2].profile_image ? (
-                                        <img src={podium[2].profile_image} alt={podium[2].username} className="w-full h-full object-cover" />
-                                    ) : (podium[2].id === currentUser?.id) ? (
+                                    {podium[2].usu_fot ? (
+                                        <img src={podium[2].usu_fot} alt={podium[2].username} className="w-full h-full object-cover" />
+                                    ) : (podium[2].usu_cod === currentUser?.usu_cod) ? (
                                         <img src={profilePic} alt={podium[2].username} className="w-full h-full object-cover" />
                                     ) : (
                                         <UserIcon className="h-10 w-10 sm:h-12 sm:w-12 text-orange-400" />
@@ -151,7 +151,7 @@ const RankingPage = () => {
                             <div className="text-center">
                                 <p className="font-bold text-slate-800 text-base sm:text-lg">@{podium[2].username}</p>
                                 <div className="bg-orange-100 text-orange-700 px-2 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-black mt-1">
-                                    {podium[2].total_score} pts
+                                    {podium[2].usu_pun_tot} pts
                                 </div>
                             </div>
                             <div className="h-14 sm:h-20 w-full bg-orange-200 rounded-t-2xl mt-4 shadow-inner flex items-center justify-center">
@@ -170,26 +170,26 @@ const RankingPage = () => {
                     <div className="divide-y divide-slate-100">
                         {others.map((u, idx) => (
                             <div
-                                key={u.id}
-                                className={`flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 transition-colors ${u.id === currentUser?.id ? 'bg-amber-50' : 'hover:bg-slate-50'}`}
+                                key={u.usu_cod}
+                                className={`flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 transition-colors ${u.usu_cod === currentUser?.usu_cod ? 'bg-amber-50' : 'hover:bg-slate-50'}`}
                             >
                                 <div className="flex items-center gap-3 sm:gap-4 overflow-hidden">
                                     <span className="w-6 text-xs sm:text-sm font-black text-slate-400 flex-shrink-0">#{idx + 4}</span>
                                     <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden flex-shrink-0">
-                                        {u.profile_image ? (
-                                            <img src={u.profile_image} alt={u.username} className="w-full h-full object-cover" />
-                                        ) : (u.id === currentUser?.id) ? (
+                                        {u.usu_fot ? (
+                                            <img src={u.usu_fot} alt={u.username} className="w-full h-full object-cover" />
+                                        ) : (u.usu_cod === currentUser?.usu_cod) ? (
                                             <img src={profilePic} alt={u.username} className="w-full h-full object-cover" />
                                         ) : (
                                             <UserIcon className="h-4 w-4 sm:h-5 sm:w-5 text-slate-400" />
                                         )}
                                     </div>
-                                    <span className={`font-bold text-xs sm:text-sm ${u.id === currentUser?.id ? 'text-[#001c4d]' : 'text-slate-700'}`}>
+                                    <span className={`font-bold text-xs sm:text-sm ${u.usu_cod === currentUser?.usu_cod ? 'text-[#001c4d]' : 'text-slate-700'}`}>
                                         @{u.username}
-                                        {u.id === currentUser?.id && <span className="ml-1 sm:ml-2 text-[8px] sm:text-[10px] uppercase bg-amber-400 px-1 sm:px-1.5 py-0.5 rounded text-[#001c4d]">Tú</span>}
+                                        {u.usu_cod === currentUser?.usu_cod && <span className="ml-1 sm:ml-2 text-[8px] sm:text-[10px] uppercase bg-amber-400 px-1 sm:px-1.5 py-0.5 rounded text-[#001c4d]">Tú</span>}
                                     </span>
                                 </div>
-                                <span className={`text-xs sm:text-sm font-black flex-shrink-0 ${u.id === currentUser?.id ? 'text-[#001c4d]' : 'text-slate-900'}`}>{u.total_score} pts</span>
+                                <span className={`text-xs sm:text-sm font-black flex-shrink-0 ${u.usu_cod === currentUser?.usu_cod ? 'text-[#001c4d]' : 'text-slate-900'}`}>{u.usu_pun_tot} pts</span>
                             </div>
                         ))}
 
@@ -199,8 +199,8 @@ const RankingPage = () => {
                                 <div className="flex items-center gap-3 sm:gap-4 overflow-hidden">
                                     <span className="w-6 text-xs sm:text-sm font-black text-blue-600 flex-shrink-0">#{data.user_rank}</span>
                                     <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-blue-600 flex items-center justify-center shadow-lg overflow-hidden flex-shrink-0">
-                                        {currentUser.profile_image ? (
-                                            <img src={currentUser.profile_image} alt={currentUser.username} className="w-full h-full object-cover" />
+                                        {currentUser.usu_fot ? (
+                                            <img src={currentUser.usu_fot} alt={currentUser.username} className="w-full h-full object-cover" />
                                         ) : (
                                             <img src={profilePic} alt={currentUser.username} className="w-full h-full object-cover" />
                                         )}
@@ -210,7 +210,7 @@ const RankingPage = () => {
                                         <span className="text-[8px] sm:text-[10px] uppercase font-bold text-blue-400 truncate">Tu posición actual</span>
                                     </div>
                                 </div>
-                                <span className="text-base sm:text-lg font-black text-[#001c4d] flex-shrink-0">{currentUser.total_score} pts</span>
+                                <span className="text-base sm:text-lg font-black text-[#001c4d] flex-shrink-0">{currentUser.usu_pun_tot} pts</span>
                             </div>
                         )}
                     </div>

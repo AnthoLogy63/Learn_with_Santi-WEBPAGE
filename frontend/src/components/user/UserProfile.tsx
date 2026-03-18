@@ -28,10 +28,10 @@ const UserProfile = () => {
   if (!user) return null;
 
   const completedCount = exams.filter((e) => e.status === "completed").length;
-  const initials = user.username.slice(0, 2).toUpperCase();
+  const initials = (user.username || "??").slice(0, 2).toUpperCase();
 
   // Generate deterministic color from username (reusing AdminProfile logic)
-  const hash = user.username.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  const hash = (user.username || "").split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
   const palette = [
     ['#001c4d', '#3b82f6'], // navy/blue
     ['#065f46', '#10b981'], // green
@@ -48,11 +48,11 @@ const UserProfile = () => {
       <div className="flex flex-col items-center text-center mb-2">
         <div
           className="w-16 h-16 lg:w-24 lg:h-24 rounded-full flex items-center justify-center text-3xl font-black mb-3 relative overflow-hidden shadow-2xl select-none bg-slate-200"
-          style={{ backgroundColor: !user.profile_image ? bgColor : undefined, color: !user.profile_image ? textColor : undefined }}
+          style={{ backgroundColor: !user.usu_fot ? bgColor : undefined, color: !user.usu_fot ? textColor : undefined }}
         >
-          {user.profile_image ? (
+          {user.usu_fot ? (
             <img
-              src={user.profile_image}
+              src={user.usu_fot}
               alt={user.username}
               className="w-full h-full object-cover"
             />
@@ -62,12 +62,11 @@ const UserProfile = () => {
               alt={user.username}
               className="w-full h-full object-cover"
             />
-          ) : user.current_rank?.badge_image ? (
-            <img
-              src={user.current_rank.badge_image}
-              alt={user.current_rank.name}
-              className="w-full h-full object-cover"
-            />
+          ) : user.ran_nom ? (
+            // In the new model, ran_nom might be just a string.
+            // If we have a badge image, it would be another field.
+            // For now let's just use initials if no photo.
+            initials
           ) : (
             initials
           )}
@@ -87,7 +86,7 @@ const UserProfile = () => {
                   Puntos Santi
                 </span>
                 <span className="text-xl font-bold text-white tabular-nums">
-                  {user.total_score}
+                  {user.usu_pun_tot}
                 </span>
               </div>
             </div>
@@ -112,9 +111,9 @@ const UserProfile = () => {
 
           </div>
 
-          {user.current_rank && (
+          {user.ran_nom && (
             <p className="text-[9px] font-black text-amber-600/80 uppercase tracking-[0.2em] mt-1">
-              Rango: {user.current_rank.name}
+              Rango: {user.ran_nom}
             </p>
           )}
         </div>

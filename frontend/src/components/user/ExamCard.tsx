@@ -36,14 +36,14 @@ const ExamCard = ({ exam }: ExamCardProps) => {
             )}
           </span>
         </div>
-        <h3 className="text-xl font-bold text-white mb-2 leading-tight">{exam.name}</h3>
+        <h3 className="text-xl font-bold text-white mb-2 leading-tight">{exam.exa_nom}</h3>
         <p className="text-sm text-white/60 mb-5 line-clamp-2 leading-relaxed font-medium">
-          {exam.description || "Sin descripción disponible para este examen."}
+          {exam.exa_des || "Sin descripción disponible para este examen."}
         </p>
       </div>
 
       <button
-        onClick={() => navigate(`/exam/${exam.id}`)}
+        onClick={() => navigate(`/exam/${exam.exa_cod}`)}
         className="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-white text-[#001c4d] font-bold text-sm hover:bg-accent hover:text-white transition-all duration-300 shadow-lg active:scale-95"
       >
         {isCompleted ? "Reintentar" : "Comenzar"}
