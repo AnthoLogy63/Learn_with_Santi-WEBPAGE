@@ -27,3 +27,8 @@ build/
 .env
 cods.txt
 testDatos.py
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
