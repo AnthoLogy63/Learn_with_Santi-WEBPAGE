@@ -1,820 +1,766 @@
 import random
 import openpyxl
-from rest_framework import viewsets, status
+import json
+from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
-from rest_framework.parsers import MultiPartParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.db import transaction
 from django.utils import timezone
 from django.db import models
-from .models import Exam, Question, Option, Attempt, AttemptQuestion, AttemptAnswer
-from .serializers import ExamSerializer, QuestionSerializer, AttemptSerializer, AttemptAnswerSerializer
+from django.contrib.auth import get_user_model
+from .models import TipoPregunta, Examen, CategoriaExamen, Pregunta, Opcion, Intento, Respuesta, PreguntaCompetencia, ExamenCategoriaCompetencia
+from users.models import Categoria, Competencia
+from .serializers import (
+    ExamenSerializer, PreguntaSerializer, IntentoSerializer, 
+    RespuestaSerializer, OpcionSerializer, TipoPreguntaSerializer
+)
 
 
 class IsStaff(IsAuthenticated):
     def has_permission(self, request, view):
         return super().has_permission(request, view) and request.user.is_staff
 
+UserModel = get_user_model()
+
 
 class ImportExamView(APIView):
     """
-    Importa un examen completo desde un archivo Excel (.xlsx).
-
-    Formato esperado (hoja única):
-    - Fila 1: encabezados (fijos)
-    - Filas siguientes: una fila por opción de respuesta
-
-    Columnas requeridas:
-        exam_name           | Nombre del examen (mismo valor para todo el examen)
-        exam_description    | Descripción del examen (opcional, solo se lee la 1ª fila)
-        questions_per_attempt | Preguntas por intento (solo fila 1, default 10)
-        max_scored_attempts | Intentos puntuables (solo fila 1, default 3)
-        max_points          | Puntos máximos (solo fila 1, default 100)
-        question_text       | Texto de la pregunta
-        question_type       | single_choice / multiple_choice / open_ended
-        question_points     | Puntos de la pregunta (default 10)
-        time_limit_seconds  | Tiempo límite en segundos (default 60)
-        option_text         | Texto de la opción (vacío si es open_ended)
-        is_correct          | TRUE / FALSE (si esta opción es correcta)
-
-    Lógica de importación:
-    - Si el examen (por nombre exacto) ya existe → se REEMPLAZAN todas sus preguntas
-      (los intentos y resultados anteriores se conservan pero quedarán huérfanos).
-    - Si no existe → se crea un examen nuevo.
-    - El admin recibe un resumen: preguntas creadas, opciones creadas, modo (nuevo/reemplazado).
+    Importa preguntas a un Examen desde Excel.
+    Formato esperado:
+    COLUMNAS: CATEGORIA, COMPETENCIA, PREGUNTA, PUNTOS, TIEMPO, OPCION_1, OPCION_2, OPCION_3, OPCION_4, CORRECTA (1-4)
     """
     permission_classes = [IsStaff]
     parser_classes = [MultiPartParser]
 
     def post(self, request):
         file_obj = request.FILES.get('file')
+        exa_cod_param = request.data.get('exa_cod') # Opcional, si queremos atarlo a uno ya existente
+        
         if not file_obj:
             return Response({'error': 'No se proporcionó ningún archivo.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not file_obj.name.endswith('.xlsx'):
-            return Response({'error': 'El archivo debe ser formato .xlsx'}, status=status.HTTP_400_BAD_REQUEST)
-
+            
         try:
             wb = openpyxl.load_workbook(file_obj)
             ws = wb.active
         except Exception:
             return Response({'error': 'No se pudo leer el archivo Excel.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Leer encabezados
-        header_row = [str(cell.value).strip().lower().replace(' ', '_') if cell.value else '' for cell in ws[1]]
-        required_cols = {'exam_name', 'question_text', 'question_type', 'option_text', 'is_correct'}
+        header_row = [str(cell.value).strip().upper() if cell.value else '' for cell in ws[1]]
+        
+        # Mapeo de columnas
+        col_map = {
+            'categoria': 'CATEGORIA',
+            'competencia': 'COMPETENCIA',
+            'pregunta': 'PREGUNTA',
+            'puntos': 'PUNTOS',
+            'tiempo': 'TIEMPO',
+            'opc1': 'OPCION_1',
+            'opc2': 'OPCION_2',
+            'opc3': 'OPCION_3',
+            'opc4': 'OPCION_4',
+            'opc5': 'OPCION_5',
+            'opc6': 'OPCION_6',
+            'opc7': 'OPCION_7',
+            'opc8': 'OPCION_8',
+            'opc9': 'OPCION_9',
+            'opc10': 'OPCION_10',
+            'correcta': 'CORRECTA',
+            'tipo': 'TIPO',
+            'titulo_examen': 'EXAMEN'
+        }
 
-        if not required_cols.issubset(set(header_row)):
-            missing = required_cols - set(header_row)
-            return Response(
-                {'error': f'Faltan columnas requeridas: {", ".join(missing)}'},
-                status=status.HTTP_400_BAD_REQUEST
+        # Verificación de columnas mínimas
+        required = {col_map['pregunta'], col_map['opc1'], col_map['correcta']}
+        if not required.issubset(set(header_row)):
+            missing = required - set(header_row)
+            return Response({'error': f'Faltan columnas requeridas: {", ".join(missing)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        idx = {key: header_row.index(val) if val in header_row else None for key, val in col_map.items()}
+
+        import uuid
+        exam = None
+        if exa_cod_param:
+            exam = Examen.objects.filter(exa_cod=exa_cod_param).first()
+
+        if not exam:
+            # Intentar obtener el nombre del primer registro que tenga la columna EXAMEN
+            exam_name = None
+            if idx['titulo_examen'] is not None:
+                for row in ws.iter_rows(min_row=2, max_row=10, values_only=True):
+                    if row[idx['titulo_examen']]:
+                        exam_name = str(row[idx['titulo_examen']]).strip()
+                        break
+            
+            if not exam_name:
+                exam_name = file_obj.name.split('.')[0]
+
+            exam = Examen.objects.create(
+                exa_cod='EX_' + uuid.uuid4().hex[:8].upper(),
+                exa_nom=exam_name,
+                exa_des=f"Examen importado el {timezone.now().strftime('%d/%m/%Y')}"
             )
+        else:
+            # Si el examen ya existe pero viene un título en el excel, ¿lo actualizamos?
+            # Por ahora solo si el admin no paso un exa_cod específico.
+            pass
 
-        col = {name: header_row.index(name) for name in header_row if name}
-
-        def get(row, name, default=''):
-            if name not in col:
-                return default
-            val = row[col[name]]
-            return val if val is not None else default
-
-        def to_bool(val):
-            return str(val).strip().upper() in ('TRUE', '1', 'SI', 'SÍ', 'YES', 'VERDADERO')
-
-        # Leer todas las filas (saltando vacías)
-        rows = []
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if all(cell is None or str(cell).strip() == '' for cell in row):
-                continue
-            rows.append(row)
-
-        if not rows:
-            return Response({'error': 'El archivo no contiene datos.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Metadatos del examen (de la primera fila)
-        first = rows[0]
-        exam_name = str(get(first, 'exam_name')).strip()
-        if not exam_name:
-            return Response({'error': 'El campo exam_name no puede estar vacío.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        exam_description = str(get(first, 'exam_description', '')).strip()
-        try:
-            questions_per_attempt = int(get(first, 'questions_per_attempt', 10))
-        except (ValueError, TypeError):
-            questions_per_attempt = 10
-        try:
-            max_scored_attempts = int(get(first, 'max_scored_attempts', 3))
-        except (ValueError, TypeError):
-            max_scored_attempts = 3
-        try:
-            max_points = int(get(first, 'max_points', 100))
-        except (ValueError, TypeError):
-            max_points = 100
-
-        # Agrupar filas por pregunta
-        questions_data = []  # [{text, type, points, time, options:[{text, is_correct}]}]
-        current_q = None
-
-        for row in rows:
-            q_text = str(get(row, 'question_text', '')).strip()
-            q_type = str(get(row, 'question_type', 'single_choice')).strip().lower()
-            opt_text = str(get(row, 'option_text', '')).strip()
-            is_correct = to_bool(get(row, 'is_correct', False))
-
-            try:
-                q_points = int(get(row, 'question_points', 10))
-            except (ValueError, TypeError):
-                q_points = 10
-            try:
-                time_limit = int(get(row, 'tiempo_segundos', get(row, 'time_limit_seconds', 60)))
-            except (ValueError, TypeError):
-                time_limit = 60
-
-            # Si hay un texto de pregunta y es distinto al actual, creamos una nueva pregunta
-            # Si el texto de pregunta está vacío, asumimos que es una opción de la pregunta actual
-            if q_text and (not current_q or q_text != current_q['text']):
-                current_q = {
-                    'text': q_text,
-                    'type': q_type if q_type in ('single_choice', 'multiple_choice', 'open_ended') else 'single_choice',
-                    'points': q_points,
-                    'time_limit': time_limit,
-                    'options': [],
-                }
-                questions_data.append(current_q)
-
-            # Agregar opción a la pregunta actual (si existe)
-            if current_q and opt_text:
-                current_q['options'].append({'text': opt_text, 'is_correct': is_correct})
-
-        if not questions_data:
-            return Response({'error': 'No se encontraron preguntas en el archivo.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Crear/actualizar en BD
+        creadas = 0
         errores = []
+
         with transaction.atomic():
-            exam, created = Exam.objects.get_or_create(
-                name=exam_name,
-                defaults={
-                    'description': exam_description,
-                    'questions_per_attempt': questions_per_attempt,
-                    'max_scored_attempts': max_scored_attempts,
-                    'max_points': max_points,
-                }
-            )
-
-            if not created:
-                # Actualizar metadatos (no borrar intentos, sí borrar preguntas)
-                exam.description = exam_description or exam.description
-                exam.questions_per_attempt = questions_per_attempt
-                exam.max_scored_attempts = max_scored_attempts
-                exam.max_points = max_points
-                exam.save()
-                # Borrar preguntas anteriores (opciones se borran en cascada)
-                exam.questions.all().delete()
-
-            total_questions = 0
-            total_options = 0
-
-            for q_data in questions_data:
+            for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                if not any(row): continue
+                
                 try:
-                    question = Question.objects.create(
-                        exam=exam,
-                        text=q_data['text'],
-                        question_type=q_data['type'],
-                        points=q_data['points'],
-                        time_limit_seconds=q_data['time_limit'],
-                    )
-                    total_questions += 1
+                    # Extraer valores de forma segura
+                    def get_val(key, default=''):
+                        v = row[idx[key]] if idx[key] is not None else None
+                        if v is None: return default
+                        return str(v).strip()
 
-                    for opt in q_data['options']:
-                        Option.objects.create(
-                            question=question,
-                            text=opt['text'],
-                            is_correct=opt['is_correct'],
-                        )
-                        total_options += 1
+                    cat_val = get_val('categoria', None)
+                    com_val = get_val('competencia', None)
+                    pre_val = get_val('pregunta')
+                    
+                    try: pun_val = int(row[idx['puntos']]) if idx['puntos'] is not None and row[idx['puntos']] else 10
+                    except: pun_val = 10
+                    
+                    try: tie_val = int(row[idx['tiempo']]) if idx['tiempo'] is not None and row[idx['tiempo']] else 60
+                    except: tie_val = 60
+                    
+                    try: tipo_val = int(row[idx['tipo']]) if idx['tipo'] is not None and row[idx['tipo']] else 1
+                    except: tipo_val = 1
+                    
+                    correcta_idx = get_val('correcta')
+
+                    if not pre_val: continue
+
+                    # 1. Manejar Categoría vinculada al examen (Búsqueda por CÓDIGO)
+                    if cat_val:
+                        categoria = Categoria.objects.filter(cat_cod=cat_val).first()
+                        if categoria:
+                            CategoriaExamen.objects.get_or_create(exa_cod=exam, cat_cod=categoria)
+                    else:
+                        categoria = None
+
+                    # 2. Manejar Competencia (Búsqueda por CÓDIGO)
+                    if com_val:
+                        competencia = Competencia.objects.filter(com_cod=com_val).first()
+                        # Si hay categoría y competencia, asegurar config en ExamenCategoriaCompetencia
+                        if categoria and competencia:
+                            ExamenCategoriaCompetencia.objects.get_or_create(
+                                exa_cod=exam, cat_cod=categoria, com_cod=competencia
+                            )
+                    else:
+                        competencia = None
+
+                    # 3. Crear Pregunta
+                    p_cod = f"PRE_{uuid.uuid4().hex[:12].upper()}"
+                    pregunta = Pregunta.objects.create(
+                        pre_cod=p_cod,
+                        exa_cod=exam,
+                        pre_tex=pre_val,
+                        pre_pun=pun_val,
+                        pre_tie=tie_val,
+                        tip_pre_cod_id=tipo_val
+                    )
+
+                    # 4. Vincular Pregunta a Competencia si existe
+                    if competencia:
+                        PreguntaCompetencia.objects.get_or_create(pre_cod=pregunta, com_cod=competencia)
+
+                    # 5. Crear Opciones (Soportamos hasta 10 columnas para Relación)
+                    for o_idx in range(1, 11):
+                        key = f'opc{o_idx}'
+                        if idx[key] is not None and row[idx[key]]:
+                            Opcion.objects.create(
+                                opc_cod=f"OPC_{uuid.uuid4().hex[:15].upper()}",
+                                pre_cod=pregunta,
+                                opc_tex=str(row[idx[key]]).strip(),
+                                opc_cor=(str(o_idx) == correcta_idx)
+                            )
+                    
+                    creadas += 1
 
                 except Exception as e:
-                    errores.append(f"Pregunta '{q_data['text'][:40]}': {str(e)}")
-
-            # Actualiza el banco de preguntas
-            exam.bank_total_questions = total_questions
-            exam.save()
+                    errores.append({'fila': row_idx, 'error': str(e)})
 
         return Response({
-            'modo': 'creado' if created else 'reemplazado',
-            'exam_id': exam.id,
-            'exam_name': exam.name,
-            'preguntas_creadas': total_questions,
-            'opciones_creadas': total_options,
-            'errores': errores,
-        }, status=status.HTTP_200_OK)
+            'status': 'completado',
+            'exa_cod': exam.exa_cod,
+            'preguntas_creadas': creadas,
+            'errores': errores
+        }, status=status.HTTP_200_OK if not errores else status.HTTP_207_MULTI_STATUS)
 
-class ExamViewSet(viewsets.ModelViewSet):
-    queryset = Exam.objects.all()
-    serializer_class = ExamSerializer
+
+class ExportExamTemplateView(APIView):
+    """
+    Descarga una plantilla de Excel para importar exámenes.
+    """
+    permission_classes = [IsStaff]
+
+    def get(self, request):
+        import openpyxl
+        from django.http import HttpResponse
+        from io import BytesIO
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Plantilla Examen"
+
+        headers = [
+            'EXAMEN', 'CATEGORIA', 'COMPETENCIA', 'PREGUNTA', 
+            'PUNTOS', 'TIEMPO', 'TIPO', 
+            'OPCION_1', 'OPCION_2', 'OPCION_3', 'OPCION_4', 
+            'OPCION_5', 'OPCION_6', 'OPCION_7', 'OPCION_8', 
+            'OPCION_9', 'OPCION_10', 'CORRECTA'
+        ]
+        ws.append(headers)
+
+        # Ejemplo
+        ws.append([
+            'EXAMEN DE PRUEBA', '0', 'COMP-AGILIDAD-MENTAL', '¿Cuánto es 2+2?', 
+            10, 60, 1, 
+            '3', '4', '5', '6', 
+            '', '', '', '', 
+            '', '', '2'
+        ])
+
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        response = HttpResponse(
+            output.read(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename=plantilla_examen.xlsx'
+        return response
+
+
+class ExamenViewSet(viewsets.ModelViewSet):
+    queryset = Examen.objects.all()
+    serializer_class = ExamenSerializer
     permission_classes = [IsAuthenticated]
 
-    def get_queryset(self):
-        if self.request.user.is_staff:
-            return Exam.objects.all()
-        return Exam.objects.filter(is_active=True, is_enabled=True)
-    
-    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
-    def toggle_enabled(self, request, pk=None):
-        if not request.user.is_staff:
-            return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
-        exam = self.get_object()
-        exam.is_enabled = not exam.is_enabled
-        exam.save()
-        return Response({'is_enabled': exam.is_enabled})
+    def get_serializer(self, *args, **kwargs):
+        # Si somos staff y estamos en 'list', usamos el modo simple
+        if self.action == 'list' and self.request.user.is_staff:
+            kwargs['simple'] = True
+        return super().get_serializer(*args, **kwargs)
 
-    @action(detail=True, methods=['post'], permission_classes=[IsStaff])
-    def sync(self, request, pk=None):
-        """
-        Sincroniza el estado completo del examen (metadatos, preguntas y opciones)
-        en una sola transacción. Soporta carga de imágenes.
-        """
-        import json
+    def get_queryset(self):
+        # A futuro: Filtrar los exámenes habilitados para la categoría del usuario
+        if self.request.user.is_staff:
+            return Examen.objects.all()
+        # Mostrar exámenes asociados a la categoría del estudiante
+        if self.request.user.cat_cod:
+            return Examen.objects.filter(categoriaexamen__cat_cod=self.request.user.cat_cod)
+        return Examen.objects.none()
+
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
+    def categorias(self, request):
+        from users.serializers import CategoriaSerializer
+        cats = Categoria.objects.all()
+        return Response(CategoriaSerializer(cats, many=True).data)
+
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
+    def competencias(self, request):
+        from users.serializers import CompetenciaSerializer
+        comps = Competencia.objects.all()
+        return Response(CompetenciaSerializer(comps, many=True).data)
+
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
+    def export_excel(self, request, pk=None):
+        """Exporta el examen a un formato Excel compatible con el importador."""
+        from django.http import HttpResponse
+        import openpyxl
+        from openpyxl.styles import Font
+
         exam = self.get_object()
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Examen"
+
+        # Headers
+        headers = [
+            'CATEGORIA', 'COMPETENCIA', 'PREGUNTA', 'PUNTOS', 'TIEMPO', 'TIPO',
+            'OPCION_1', 'OPCION_2', 'OPCION_3', 'OPCION_4', 'OPCION_5', 
+            'OPCION_6', 'OPCION_7', 'OPCION_8', 'OPCION_9', 'OPCION_10',
+            'CORRECTA', 'EXAMEN'
+        ]
         
-        # Extraer datos JSON de FormData
-        data_str = request.data.get('data')
-        if not data_str:
-            return Response({'error': 'No data provided'}, status=status.HTTP_400_BAD_REQUEST)
+        for col_num, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_num)
+            cell.value = header
+            cell.font = Font(bold=True)
+
+        # Content
+        row_num = 2
+        preguntas = Pregunta.objects.filter(exa_cod=exam).prefetch_related('opciones')
+        
+        for pre in preguntas:
+            cat_obj = CategoriaExamen.objects.filter(exa_cod=exam).first()
+            cat_nom = cat_obj.cat_cod.cat_nom if cat_obj else ""
+            comp_obj = PreguntaCompetencia.objects.filter(pre_cod=pre).first()
+            comp_nom = comp_obj.com_cod.com_nom if comp_obj else ""
+
+            ws.cell(row=row_num, column=1, value=cat_nom)
+            ws.cell(row=row_num, column=2, value=comp_nom)
+            ws.cell(row=row_num, column=3, value=pre.pre_tex)
+            ws.cell(row=row_num, column=4, value=pre.pre_pun)
+            ws.cell(row=row_num, column=5, value=pre.pre_tie)
+            ws.cell(row=row_num, column=6, value=pre.tip_pre_cod_id or 1)
+            
+            correcta_idx = ""
+            for i, opt in enumerate(pre.opciones.all()[:10], 1):
+                ws.cell(row=row_num, column=6 + i, value=opt.opc_tex)
+                if opt.opc_cor:
+                    correcta_idx = str(i)
+            
+            ws.cell(row=row_num, column=17, value=correcta_idx)
+            ws.cell(row=row_num, column=18, value=exam.exa_nom)
+            row_num += 1
+
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = f'attachment; filename=examen_{exam.exa_cod}.xlsx'
+        wb.save(response)
+        return response
+
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
+    def start_or_resume(self, request, pk=None):
+        """
+        Endpoint 1 en 1: Devuelve el examen, preguntas y opciones generadas para este intento.
+        """
+        examen = self.get_object()
+        user = request.user
+        
+        # Buscar intento en progreso
+        intento = Intento.objects.filter(usu_cod=user, exa_cod=examen, exa_fec_fin__isnull=True).first()
+        
+        if not intento:
+            # Crear Intento Nuevo
+            num_intentos = Intento.objects.filter(usu_cod=user, exa_cod=examen).count()
+            intento_cod = f"{user.usu_cod}_{examen.exa_cod}_{num_intentos+1}"
+            
+            intento = Intento.objects.create(
+                int_cod=intento_cod,
+                usu_cod=user,
+                exa_cod=examen,
+                exa_num_int=num_intentos + 1
+            )
+
+            # Generación de preguntas basada en la configuración ExamenCategoriaCompetencia
+            preguntas_seleccionadas = []
+
+            if user.cat_cod:
+                configuraciones = ExamenCategoriaCompetencia.objects.filter(
+                    exa_cod=examen, cat_cod=user.cat_cod
+                )
+
+                if configuraciones.exists():
+                    # Una sola query: todas las preguntas del examen con sus competencias
+                    preguntas_por_competencia: dict = {}
+                    preg_comp_qs = PreguntaCompetencia.objects.filter(
+                        pre_cod__exa_cod=examen
+                    ).select_related('pre_cod').values('com_cod_id', 'pre_cod_id')
+
+                    for pc in preg_comp_qs:
+                        preguntas_por_competencia.setdefault(pc['com_cod_id'], []).append(pc['pre_cod_id'])
+
+                    # Una sola query: todas las preguntas necesarias de una vez
+                    todos_ids_necesarios = set()
+                    for conf in configuraciones:
+                        todos_ids_necesarios.update(preguntas_por_competencia.get(conf.com_cod_id, []))
+
+                    preguntas_map = {
+                        p.pre_cod: p
+                        for p in Pregunta.objects.filter(pre_cod__in=todos_ids_necesarios)
+                    }
+
+                    for conf in configuraciones:
+                        ids_comp = preguntas_por_competencia.get(conf.com_cod_id, [])
+                        preguntas_disponibles = [preguntas_map[pid] for pid in ids_comp if pid in preguntas_map]
+                        cantidad = min(conf.num_preguntas, len(preguntas_disponibles))
+                        if cantidad > 0:
+                            preguntas_seleccionadas.extend(random.sample(preguntas_disponibles, cantidad))
+
+            # Fallback: si no hay configuración o no hay categoría, 10 al azar
+            if not preguntas_seleccionadas:
+                todas = list(Pregunta.objects.filter(exa_cod=examen))
+                cantidad = min(10, len(todas))
+                preguntas_seleccionadas = random.sample(todas, cantidad) if cantidad > 0 else []
+
+            random.shuffle(preguntas_seleccionadas)
+
+            # Bulk insert de Respuestas (1 operación en lugar de N)
+            Respuesta.objects.bulk_create([
+                Respuesta(
+                    res_cod=f"{intento.int_cod}_{p.pre_cod}",
+                    int_cod=intento,
+                    pre_cod=p,
+                )
+                for p in preguntas_seleccionadas
+            ])
+        
+        # Extraer las preguntas desde las Respuestas atadas al Intento
+        respuestas = Respuesta.objects.filter(int_cod=intento).select_related('pre_cod', 'opc_cod')
+        preguntas_ids = respuestas.values_list('pre_cod', flat=True)
+        preguntas = Pregunta.objects.filter(pre_cod__in=preguntas_ids).prefetch_related('opciones')
+        
+        serializer = PreguntaSerializer(preguntas, many=True, context={'request': request})
+
+        # Respuestas ya guardadas (para resume)
+        respuestas_guardadas = []
+        for r in respuestas:
+            if r.opc_cod_id or r.res_tex:
+                respuestas_guardadas.append({
+                    'pre_cod': r.pre_cod_id,
+                    'opc_cod': r.opc_cod_id,
+                    'res_tex': r.res_tex or ''
+                })
+        
+        return Response({
+            'int_cod': intento.int_cod,
+            'exa_nom': examen.exa_nom,
+            'exa_des': examen.exa_des,
+            'questions': serializer.data,
+            'respuestas': respuestas_guardadas
+        })
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def save_progress(self, request, pk=None):
+        """Guarda respuesta en modo intento interrumpible"""
+        user = request.user
+        int_cod = request.data.get('int_cod')
         
         try:
-            data = json.loads(data_str)
-        except json.JSONDecodeError:
-            return Response({'error': 'Invalid JSON data'}, status=status.HTTP_400_BAD_REQUEST)
+            intento = Intento.objects.get(int_cod=int_cod, usu_cod=user, exa_fec_fin__isnull=True)
+        except Intento.DoesNotExist:
+            return Response({'error': 'Intento no encontrado o ya finalizado.'}, status=status.HTTP_404_NOT_FOUND)
+
+        respuestas_data = request.data.get('respuestas', [])
+        
+        for data in respuestas_data:
+            pre_cod = data.get('pre_cod')
+            opc_cod = data.get('opc_cod')
+            res_tex = data.get('res_tex', '')
+
+            try:
+                res = Respuesta.objects.get(int_cod=intento, pre_cod=pre_cod)
+                if opc_cod:
+                    opcion = Opcion.objects.get(opc_cod=opc_cod)
+                    res.opc_cod = opcion
+                    res.res_cor = opcion.opc_cor
+                    res.res_pun = res.pre_cod.pre_pun if opcion.opc_cor else 0
+                else:
+                    res.res_tex = res_tex
+                    # Open ended logica
+                    if res_tex.strip():
+                        res.res_cor = True
+                        res.res_pun = res.pre_cod.pre_pun
+                    else:
+                        res.res_cor = False
+                        res.res_pun = 0
+
+                res.save()
+            except (Respuesta.DoesNotExist, Opcion.DoesNotExist):
+                continue
+                
+        return Response({'status': 'Guardado'})
+
+    @action(detail=True, methods=['post'], permission_classes=[IsStaff])
+    def bulk_save(self, request, pk=None):
+        """
+        Guarda todo el examen de golpe: Metadatos, Preguntas y Opciones.
+        """
+        examen = self.get_object()
+        data = request.data
+        
+        # 1. Actualizar Metadatos
+        examen.exa_nom = data.get('exa_nom', examen.exa_nom)
+        examen.exa_des = data.get('exa_des', examen.exa_des)
+        examen.save()
 
         questions_data = data.get('questions', [])
         
         with transaction.atomic():
-            # 1. Sincronizar metadatos del examen
-            exam.name = data.get('name', exam.name)
-            exam.description = data.get('description', exam.description)
-            exam.is_timed = data.get('is_timed', exam.is_timed)
-            exam.questions_per_attempt = data.get('questions_per_attempt', exam.questions_per_attempt)
-            exam.max_scored_attempts = data.get('max_scored_attempts', exam.max_scored_attempts)
-            exam.max_points = data.get('max_points', exam.max_points)
-            exam.save()
-
-            # 2. Sincronizar preguntas
-            processed_question_ids = []
+            # Obtener IDs de preguntas actuales para saber cuáles borrar si no vienen
+            # preguntamos si el usuario quiere "sync" total o solo procesar los que vienen
+            # El usuario dijo "todo de una", así que procesamos la lista recibida.
             
             for q_data in questions_data:
-                q_id = q_data.get('id')
-                # Si es un ID temporal (decimal/random) o marcado como isNew
-                is_new = q_data.get('isNew') or (isinstance(q_id, float) or (isinstance(q_id, int) and q_id < 0))
-                
-                # Imagen para esta pregunta (si existe en los archivos subidos)
-                q_file_key = f"image_q_{q_id}"
-                q_image_file = request.FILES.get(q_file_key)
+                pre_cod = q_data.get('pre_cod')
+                is_deleted = q_data.get('isDeleted', False)
+                is_new = q_data.get('isNew', False)
 
-                if q_data.get('isDeleted'):
+                if is_deleted:
                     if not is_new:
-                        Question.objects.filter(id=q_id, exam=exam).delete()
+                        Pregunta.objects.filter(pre_cod=pre_cod, exa_cod=examen).delete()
                     continue
 
-                if is_new:
-                    # Crear nueva pregunta
-                    question = Question.objects.create(
-                        exam=exam,
-                        text=q_data.get('text', ''),
-                        question_type=q_data.get('question_type', 'single_choice'),
-                        points=q_data.get('points', 10),
-                        time_limit_seconds=q_data.get('time_limit_seconds', 60)
-                    )
-                    if q_image_file:
-                        question.image = q_image_file
-                        question.save()
-                else:
-                    # Actualizar pregunta existente
-                    question = Question.objects.get(id=q_id, exam=exam)
-                    question.text = q_data.get('text', question.text)
-                    question.question_type = q_data.get('question_type', question.question_type)
-                    question.points = q_data.get('points', question.points)
-                    question.time_limit_seconds = q_data.get('time_limit_seconds', question.time_limit_seconds)
-                    if q_image_file:
-                        question.image = q_image_file
-                    question.save()
+                # Crear o Actualizar
+                pre_defaults = {
+                    'pre_tex': q_data.get('pre_tex', ''),
+                    'pre_pun': q_data.get('pre_pun', 10),
+                    'pre_tie': q_data.get('pre_tie', 60),
+                    'tip_pre_cod_id': q_data.get('tip_pre_cod', 1),
+                }
 
-                processed_question_ids.append(question.id)
-
-                # 3. Sincronizar opciones para esta pregunta
-                processed_option_ids = []
-                for o_data in q_data.get('options', []):
-                    o_id = o_data.get('id')
-                    is_new_opt = o_data.get('isNew') or (isinstance(o_id, float) or (isinstance(o_id, int) and o_id < 0))
+                # Solo actualizar pre_fot si viene explícitamente en el JSON y no es un archivo (bulk_save es JSON)
+                if 'pre_fot' in q_data and isinstance(q_data['pre_fot'], str):
+                    val = q_data['pre_fot']
+                    if val.startswith('http://') or val.startswith('https://'):
+                        from urllib.parse import urlparse
+                        val = urlparse(val).path
                     
-                    if o_data.get('isDeleted'):
-                        if not is_new_opt:
-                            Option.objects.filter(id=o_id, question=question).delete()
+                    if val.startswith('/media/'):
+                        val = val[len('/media/'):]
+                    
+                    pre_defaults['pre_fot'] = val.strip('/')
+                
+                if is_new:
+                    import uuid
+                    new_cod = f"PRE_{uuid.uuid4().hex[:12].upper()}"
+                    pregunta = Pregunta.objects.create(
+                        pre_cod=new_cod,
+                        exa_cod=examen,
+                        **pre_defaults
+                    )
+                else:
+                    pregunta, _ = Pregunta.objects.update_or_create(
+                        pre_cod=pre_cod,
+                        exa_cod=examen,
+                        defaults=pre_defaults
+                    )
+
+                # Procesar Competencia de la Pregunta
+                com_cod = q_data.get('com_cod')
+                if com_cod:
+                    try:
+                        competencia = Competencia.objects.get(com_cod=com_cod)
+                        PreguntaCompetencia.objects.update_or_create(
+                            pre_cod=pregunta,
+                            defaults={'com_cod': competencia}
+                        )
+                    except Competencia.DoesNotExist:
+                        pass
+                else:
+                    PreguntaCompetencia.objects.filter(pre_cod=pregunta).delete()
+
+                # Procesar Opciones
+                options_data = q_data.get('options', [])
+                for o_data in options_data:
+                    opc_cod = o_data.get('opc_cod')
+                    o_deleted = o_data.get('isDeleted', False)
+                    o_new = o_data.get('isNew', False)
+
+                    if o_deleted:
+                        if not o_new:
+                            Opcion.objects.filter(opc_cod=opc_cod, pre_cod=pregunta).delete()
                         continue
                     
-                    if is_new_opt:
-                        option = Option.objects.create(
-                            question=question,
-                            text=o_data.get('text', ''),
-                            is_correct=o_data.get('is_correct', False)
+                    o_defaults = {
+                        'opc_tex': o_data.get('opc_tex', ''),
+                        'opc_cor': o_data.get('opc_cor', False),
+                    }
+
+                    if o_new:
+                        import uuid
+                        Opcion.objects.create(
+                            opc_cod=f"OPC_{uuid.uuid4().hex[:15].upper()}",
+                            pre_cod=pregunta,
+                            **o_defaults
                         )
                     else:
-                        option = Option.objects.get(id=o_id, question=question)
-                        option.text = o_data.get('text', option.text)
-                        option.is_correct = o_data.get('is_correct', option.is_correct)
-                        option.save()
-                    
-                    processed_option_ids.append(option.id)
-                
-                # Eliminar opciones de la pregunta que ya no están en los datos (y no son nuevas)
-                # (Esto es un safeguard, aunque ya manejamos isDeleted)
-                # Option.objects.filter(question=question).exclude(id__in=processed_option_ids).delete()
+                        Opcion.objects.update_or_create(
+                            opc_cod=opc_cod,
+                            pre_cod=pregunta,
+                            defaults=o_defaults
+                        )
 
-            # Safeguard: Eliminar preguntas del examen que ya no están en el objeto enviado
-            # Question.objects.filter(exam=exam).exclude(id__in=processed_question_ids).delete()
+            # --- Procesar Configuración de Examen (Categorías y Competencias) ---
+            config_data = data.get('config', [])
+            if config_data is not None:
+                # 1. Limpiar configuración actual
+                CategoriaExamen.objects.filter(exa_cod=examen).delete()
+                ExamenCategoriaCompetencia.objects.filter(exa_cod=examen).delete()
 
-            # Actualizar banco de preguntas
-            exam.bank_total_questions = Question.objects.filter(exam=exam).count()
-            exam.save()
+                # 2. Recrear según la nueva data
+                for c_item in config_data:
+                    cat_cod = c_item.get('cat_cod')
+                    if not cat_cod: continue
 
-        return Response({'status': 'success', 'processed_questions': len(processed_question_ids)})
+                    try:
+                        categoria = Categoria.objects.get(cat_cod=cat_cod)
+                        # Vincular categoría al examen
+                        CategoriaExamen.objects.get_or_create(exa_cod=examen, cat_cod=categoria)
 
-    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
-    def export_csv(self, request, pk=None):
-        if not request.user.is_staff:
-            return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
-            
-        import csv
-        from django.http import HttpResponse
-        
-        exam = self.get_object()
-        # Get all questions for this exam to fix columns
-        questions = list(Question.objects.filter(exam=exam).order_by('id'))
-        attempts = Attempt.objects.filter(exam=exam, status='completed').order_by('started_at')
-        
-        response = HttpResponse(content_type='text/csv')
-        filename = f'resultados_{exam.name.replace(" ", "_").lower()}.csv'
-        response['Content-Disposition'] = f'attachment; filename={filename}'
-        
-        # Add UTF-8 BOM for Excel compatibility with accents
-        response.write('\ufeff'.encode('utf8'))
-        
-        writer = csv.writer(response)
-        
-        # Pre-fetch question options for letter mapping
-        options_map = {}
-        for q in questions:
-            options_map[q.id] = list(Option.objects.filter(question=q).order_by('id'))
-        
-        # Header construction
-        header = ['ID', 'Start time', 'Completion time', 'Email', 'Name', 'DNI', 'Total points', 'Nº Intento']
-        for q in questions:
-            header.append(q.text)
-            header.append(f'Points - {q.text}')
-        
-        writer.writerow(header)
-        
-        for row_idx, obj in enumerate(attempts, start=1):
-            # Basic info
-            row = [
-                row_idx,
-                obj.started_at.strftime("%Y-%m-%d %H:%M:%S") if obj.started_at else "",
-                obj.completed_at.strftime("%Y-%m-%d %H:%M:%S") if obj.completed_at else "",
-                obj.user.email,
-                obj.user.username,
-                getattr(obj.user, 'dni', ''),
-                obj.score_obtained,
-                obj.attempt_number,
-            ]
-            
-            # Answer info for each question
-            answers_map = {ans.question_id: ans for ans in AttemptAnswer.objects.filter(attempt=obj)}
-            
-            for q in questions:
-                ans_obj = answers_map.get(q.id)
-                q_options = options_map.get(q.id, [])
-                
-                if ans_obj:
-                    # Format selected answer text with letters
-                    selected_text = ""
-                    if q.question_type == 'multiple_choice':
-                        selected_parts = []
-                        sel_opts = set(ans_obj.selected_options.all().values_list('id', flat=True))
-                        for i, opt in enumerate(q_options):
-                            if opt.id in sel_opts:
-                                selected_parts.append(f"{chr(65+i)}. {opt.text}")
-                        selected_text = ", ".join(selected_parts)
-                    elif q.question_type == 'open_ended':
-                        selected_text = ans_obj.text_response or ""
-                    else:
-                        if ans_obj.selected_option:
-                            index = -1
-                            for i, opt in enumerate(q_options):
-                                if opt.id == ans_obj.selected_option_id:
-                                    index = i
-                                    break
-                            if index != -1:
-                                selected_text = f"{chr(65+index)}. {ans_obj.selected_option.text}"
-                            else:
-                                selected_text = ans_obj.selected_option.text
-                        else:
-                            selected_text = ""
-                    
-                    row.append(selected_text)
-                    row.append(ans_obj.points_obtained)
-                else:
-                    # Question not in this attempt
-                    row.append("")
-                    row.append(0)
-            
-            writer.writerow(row)
-            
-        return response
+                        # Vincular competencias de esta categoría
+                        comp_configs = c_item.get('competencies', [])
+                        for co_conf in comp_configs:
+                            com_cod = co_conf.get('com_cod')
+                            num_preg = co_conf.get('num_preguntas', 0)
+                            if not com_cod: continue
 
-    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
-    def questions(self, request, pk=None):
-        exam = self.get_object()
-        user = request.user
-        
-        # Get or create an active attempt
-        attempt = Attempt.objects.filter(user=user, exam=exam, status='in_progress').first()
-        
-        if not attempt:
-            # Smart selection logic:
-            
-            # 1. Get IDs of questions user has EVER answered in this exam
-            answered_question_ids = AttemptAnswer.objects.filter(
-                attempt__user=user,
-                attempt__exam=exam,
-                attempt__status='completed'
-            ).values_list('question_id', flat=True).distinct()
-            
-            # 2. Get IDs of questions user has EVER answered CORRECTLY
-            correct_question_ids = AttemptAnswer.objects.filter(
-                attempt__user=user,
-                attempt__exam=exam,
-                attempt__status='completed',
-                is_correct=True
-            ).values_list('question_id', flat=True).distinct()
-            
-            all_questions = list(Question.objects.filter(exam=exam))
-            
-            # 3. Categorize questions
-            unseen_questions = [q for q in all_questions if q.id not in answered_question_ids]
-            failed_questions = [q for q in all_questions if q.id in answered_question_ids and q.id not in correct_question_ids]
-            mastered_questions = [q for q in all_questions if q.id in correct_question_ids]
-            
-            num_needed = min(len(all_questions), exam.questions_per_attempt)
-            selected_questions = []
+                            try:
+                                competencia = Competencia.objects.get(com_cod=com_cod)
+                                ExamenCategoriaCompetencia.objects.create(
+                                    exa_cod=examen,
+                                    cat_cod=categoria,
+                                    com_cod=competencia,
+                                    num_preguntas=num_preg
+                                )
+                            except Competencia.DoesNotExist:
+                                continue
+                    except Categoria.DoesNotExist:
+                        continue
 
-            # Priority 1: Unseen questions
-            if len(unseen_questions) > 0:
-                take = min(len(unseen_questions), num_needed)
-                selected_questions.extend(random.sample(unseen_questions, take))
-            
-            # Priority 2: Failed questions (if still needed)
-            needed_still = num_needed - len(selected_questions)
-            if needed_still > 0 and len(failed_questions) > 0:
-                take = min(len(failed_questions), needed_still)
-                selected_questions.extend(random.sample(failed_questions, take))
-            
-            # Priority 3: Mastered questions (to fill the 10, if everything else is exhausted)
-            needed_still = num_needed - len(selected_questions)
-            if needed_still > 0 and len(mastered_questions) > 0:
-                take = min(len(mastered_questions), needed_still)
-                selected_questions.extend(random.sample(mastered_questions, take))
-            
-            # Shuffle the final selection so they don't appear in "priority order"
-            random.shuffle(selected_questions)
-            
-            attempt = Attempt.objects.create(user=user, exam=exam)
-            
-            # Create AttemptQuestions to preserve order
-            for i, q in enumerate(selected_questions):
-                AttemptQuestion.objects.create(attempt=attempt, question=q, order_number=i+1)
+        # Aseguramos devolver todo el estado fresco para sincronizar el frontend
+        updated_questions = Pregunta.objects.filter(exa_cod=examen).prefetch_related('opciones')
         
-        # Return questions in the attempt
-        questions = [aq.question for aq in attempt.attempt_questions.all()]
-        serializer = QuestionSerializer(questions, many=True)
         return Response({
-            'attempt_id': attempt.id,
-            'questions': serializer.data
+            'status': 'ok', 
+            'exam': ExamenSerializer(examen, context={'request': request}).data,
+            'questions': PreguntaSerializer(updated_questions, many=True, context={'request': request}).data
         })
 
-    @action(detail=False, methods=['get'], permission_classes=[IsStaff])
-    def stats_summary(self, request):
-        from django.db.models import Avg, Count, Max, Q, OuterRef, Subquery, IntegerField
-        from django.contrib.auth import get_user_model
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
+    def get_config(self, request, pk=None):
+        examen = self.get_object()
         
-        UserModel = get_user_model()
+        # Obtener categorías asociadas
+        categorias_ids = CategoriaExamen.objects.filter(exa_cod=examen).values_list('cat_cod', flat=True)
         
-        # Get all exams
-        exams = Exam.objects.all()
-        stats = []
-        
-        for exam in exams:
-            # Subquery to find the best score for each analyst for this specific exam
-            best_attempt_sq = Attempt.objects.filter(
-                user=OuterRef('pk'),
-                exam=exam,
-                status='completed',
-                counts_for_score=True
-            ).order_by('-score_obtained').values('score_obtained')[:1]
-            
-            # Subquery for the ID of that best attempt (to use for question stats)
-            best_attempt_id_sq = Attempt.objects.filter(
-                user=OuterRef('pk'),
-                exam=exam,
-                status='completed',
-                counts_for_score=True
-            ).order_by('-score_obtained').values('id')[:1]
-            
-            # Annotate analysts with their best score for this exam
-            analysts_with_scores = UserModel.objects.filter(is_staff=False).annotate(
-                best_exam_score=Subquery(best_attempt_sq, output_field=IntegerField()),
-                best_attempt_id=Subquery(best_attempt_id_sq, output_field=IntegerField())
-            ).filter(best_exam_score__isnull=False)
-            
-            # Aggregate stats
-            agg = analysts_with_scores.aggregate(
-                total_analysts=Count('id'),
-                avg_score=Avg('best_exam_score')
-            )
-            
-            total_analysts = agg['total_analysts']
-            avg_score = agg['avg_score'] or 0
-            
-            # Get best attempt IDs for question analysis
-            best_attempt_ids = list(analysts_with_scores.values_list('best_attempt_id', flat=True))
-            
-            # Question stats logic
-            q_stats = []
-            if best_attempt_ids:
-                questions = Question.objects.filter(exam=exam).prefetch_related('options')
-                
-                # Batch count answers to avoid N+1
-                all_relevant_answers = AttemptAnswer.objects.filter(
-                    question__exam=exam,
-                    attempt_id__in=best_attempt_ids
-                ).select_related('question')
-                
-                # Pre-calculate distribution
-                for q in questions:
-                    q_answers = [a for a in all_relevant_answers if a.question_id == q.id]
-                    total_q = len(q_answers)
-                    correct_q = len([a for a in q_answers if a.is_correct])
-                    
-                    choices = []
-                    for opt in q.options.all():
-                        if q.question_type == 'multiple_choice':
-                            count = AttemptAnswer.objects.filter(id__in=[a.id for a in q_answers], selected_options=opt).count()
-                        else:
-                            count = len([a for a in q_answers if a.selected_option_id == opt.id])
-                        
-                        choices.append({
-                            'text': opt.text,
-                            'is_correct': opt.is_correct,
-                            'count': count,
-                            'percent': round((count / total_q * 100) if total_q > 0 else 0)
-                        })
-
-                    q_stats.append({
-                        'id': q.id,
-                        'text': q.text,
-                        'type': q.question_type,
-                        'total': total_q,
-                        'correct': correct_q,
-                        'percent': round((correct_q / total_q * 100) if total_q > 0 else 0),
-                        'choices': choices
-                    })
-
-            stats.append({
-                'id': exam.id,
-                'name': exam.name,
-                'total_attempts': total_analysts, 
-                'avg_score': round(avg_score),
-                'question_stats': q_stats
+        config = []
+        for cat_cod in categorias_ids:
+            competencias = ExamenCategoriaCompetencia.objects.filter(exa_cod=examen, cat_cod=cat_cod)
+            config.append({
+                'cat_cod': cat_cod,
+                'competencies': [
+                    {
+                        'com_cod': comp.com_cod_id,
+                        'num_preguntas': comp.num_preguntas
+                    } for comp in competencias
+                ]
             })
             
-        return Response(stats)
+        return Response(config)
 
-    @action(detail=True, methods=['get'], permission_classes=[IsStaff])
-    def all_questions(self, request, pk=None):
-        """
-        Retorna todas las preguntas y opciones de un examen (para vista previa de administrador).
-        No crea intentos ni limita el número de preguntas.
-        """
-        exam = self.get_object()
-        questions = Question.objects.filter(exam=exam).order_by('id')
-        serializer = QuestionSerializer(questions, many=True)
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def finish_attempt(self, request, pk=None):
+        MAX_SCORED_ATTEMPTS = 3
+        user = request.user
+        int_cod = request.data.get('int_cod')
+        
+        try:
+            intento = Intento.objects.get(int_cod=int_cod, usu_cod=user, exa_fec_fin__isnull=True)
+        except Intento.DoesNotExist:
+            return Response({'error': 'Intento no encontrado o ya finalizado.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        examen = intento.exa_cod
+
+        # Calcular puntos totales y correctas desde Respuestas
+        respuestas = Respuesta.objects.filter(int_cod=intento).select_related('pre_cod')
+        total_puntos = respuestas.aggregate(models.Sum('res_pun'))['res_pun__sum'] or 0
+        correct_count = respuestas.filter(res_cor=True).count()
+        total_questions = respuestas.count()
+
+        intento.exa_pun_tot = total_puntos
+        intento.exa_fec_fin = timezone.now()
+        intento.save()
+
+        # Contar intentos COMPLETADOS (incluyendo el actual)
+        intentos_completados = Intento.objects.filter(
+            usu_cod=user, exa_cod=examen, exa_fec_fin__isnull=False
+        ).count()
+        attempts_left = max(0, MAX_SCORED_ATTEMPTS - intentos_completados)
+        counts_for_score = intentos_completados <= MAX_SCORED_ATTEMPTS
+
+        # Actualizar usu_pun_tot solo si este intento cuenta y mejoró el mejor puntaje previo
+        if counts_for_score:
+            mejor_puntaje_previo = Intento.objects.filter(
+                usu_cod=user, exa_cod=examen, exa_fec_fin__isnull=False
+            ).exclude(int_cod=intento.int_cod).aggregate(models.Max('exa_pun_tot'))['exa_pun_tot__max'] or 0
+
+            mejora = max(0, total_puntos - mejor_puntaje_previo)
+            if mejora > 0:
+                user.usu_pun_tot = (user.usu_pun_tot or 0) + mejora
+                user.save()
+
         return Response({
-            'exam_name': exam.name,
-            'total_questions': questions.count(),
-            'questions': serializer.data
+            'status': 'finalizado',
+            'score': total_puntos,
+            'correct_count': correct_count,
+            'total_questions': total_questions,
+            'counts_for_score': counts_for_score,
+            'attempts_left': attempts_left,
+            'total_user_score': user.usu_pun_tot,
         })
 
-class AttemptViewSet(viewsets.ModelViewSet):
-    queryset = Attempt.objects.all()
-    serializer_class = AttemptSerializer
+
+class IntentoViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Intento.objects.all()
+    serializer_class = IntentoSerializer
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
         if self.request.user.is_staff:
-            return Attempt.objects.all()
-        return Attempt.objects.filter(user=self.request.user)
+            return Intento.objects.all()
+        return Intento.objects.filter(usu_cod=self.request.user)
 
-    @action(detail=False, methods=['get'])
-    def user_results(self, request):
-        if not request.user.is_staff:
-            return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
-        
-        from django.contrib.auth import get_user_model
-        from django.db.models import Prefetch
-        UserModel = get_user_model()
-        
-        search_query = request.query_params.get('search', '')
-        offset = int(request.query_params.get('offset', 0))
-        limit = 10
-        
-        analysts = UserModel.objects.filter(is_staff=False)
-        if search_query:
-            # Optimize: use username__icontains but ensure it's indexed
-            analysts = analysts.filter(username__icontains=search_query)
-            
-        total_count = analysts.count()
-        # Optimize: avoid loading all users if not needed
-        analysts_page = analysts.order_by('username')[offset:offset+limit]
-        
-        # Optimize: Prefetch attempts and their answers to avoid N+1
-        attempts_prefetch = Prefetch(
-            'attempts',
-            queryset=Attempt.objects.filter(status='completed').select_related('exam').prefetch_related(
-                Prefetch('answers', queryset=AttemptAnswer.objects.select_related('question').prefetch_related('selected_options'))
-            ).order_by('-completed_at'),
-            to_attr='completed_attempts'
-        )
-        
-        analysts_with_data = analysts_page.prefetch_related(attempts_prefetch)
-        
-        results = []
-        for user in analysts_with_data:
-            attempts_data = []
-            for attempt in user.completed_attempts:
-                ans_data = []
-                for a in attempt.answers.all():
-                    selected_text = "N/A"
-                    if a.question.question_type == 'multiple_choice':
-                        selected_text = ", ".join([o.text for o in a.selected_options.all()])
-                    elif a.question.question_type == 'open_ended':
-                        selected_text = a.text_response or ""
-                    else:
-                        selected_text = a.selected_option.text if a.selected_option else "N/A"
+class PreguntaViewSet(viewsets.ModelViewSet):
+    queryset = Pregunta.objects.all()
+    serializer_class = PreguntaSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    permission_classes = [IsStaff]
 
-                    ans_data.append({
-                        'question': a.question.text,
-                        'selected': selected_text,
-                        'is_correct': a.is_correct
-                    })
-                
-                attempts_data.append({
-                    'id': attempt.id,
-                    'exam_id': attempt.exam.id,
-                    'exam_name': attempt.exam.name,
-                    'score': attempt.score_obtained,
-                    'date': attempt.completed_at,
-                    'attempt_number': attempt.attempt_number,
-                    'counts_for_score': attempt.counts_for_score,
-                    'answers': ans_data
-                })
-            
-            results.append({
-                'id': user.id,
-                'username': user.username,
-                'total_score': user.total_score,
-                'attempts': attempts_data
-            })
-            
-        return Response({
-            'results': results,
-            'total': total_count,
-            'has_more': (offset + limit) < total_count
-        })
+    def get_queryset(self):
+        exa_cod = self.request.query_params.get('exa_cod')
+        if exa_cod:
+            return Pregunta.objects.filter(exa_cod=exa_cod)
+        return super().get_queryset()
 
-    @action(detail=True, methods=['post'])
-    def submit_answers(self, request, pk=None):
-        attempt = self.get_object()
-        if attempt.status != 'in_progress':
-            return Response({'error': 'Attempt is already finished'}, status=status.HTTP_400_BAD_REQUEST)
+    def perform_create(self, serializer):
+        # Inyectar exa_cod desde query params si no viene en el body
+        exa_cod = self.request.data.get('exa_cod')
+        if not exa_cod:
+            exa_cod = self.request.query_params.get('exa_cod')
         
-        answers_data = request.data.get('answers', [])
-        total_points = 0
-        
-        for ans in answers_data:
-            question_id = ans.get('question_id')
-            option_id = ans.get('selected_option_id') # single
-            option_ids = ans.get('selected_option_ids', []) # multiple
-            text_response = ans.get('text_response') # open
-            
+        if exa_cod:
             try:
-                question = Question.objects.get(id=question_id, exam=attempt.exam)
-                
-                # Get or create answer object
-                answer_obj, created = AttemptAnswer.objects.get_or_create(
-                    attempt=attempt,
-                    question=question
-                )
-                
-                if question.question_type == 'single_choice':
-                    option = Option.objects.get(id=option_id, question=question) if option_id else None
-                    answer_obj.selected_option = option
-                    answer_obj.save() # calculates points in models.py
-                    
-                elif question.question_type == 'multiple_choice':
-                    # Multiple choice scoring: all correct options must be selected, no incorrect ones
-                    options = Option.objects.filter(id__in=option_ids, question=question)
-                    answer_obj.selected_options.set(options)
-                    
-                    correct_options_ids = set(Option.objects.filter(question=question, is_correct=True).values_list('id', flat=True))
-                    selected_ids = set(option_ids)
-                    
-                    if selected_ids == correct_options_ids and len(correct_options_ids) > 0:
-                        answer_obj.is_correct = True
-                        answer_obj.points_obtained = question.points
-                    else:
-                        answer_obj.is_correct = False
-                        answer_obj.points_obtained = 0
-                    answer_obj.save()
-                    
-                elif question.question_type == 'open_ended':
-                    answer_obj.text_response = text_response
-                    answer_obj.save() # calculates points in models.py (non-empty = correct)
-                
-                total_points += answer_obj.points_obtained
-            except (Question.DoesNotExist, Option.DoesNotExist):
-                continue
-        
-        # Calculate final score (0-100)
-        aq_count = AttemptQuestion.objects.filter(attempt=attempt).count()
-        max_possible_points = AttemptQuestion.objects.filter(attempt=attempt).aggregate(total=models.Sum('question__points'))['total'] or 0
-        
-        if max_possible_points > 0:
-            score = round((total_points / max_possible_points) * 100)
+                examen = Examen.objects.get(exa_cod=exa_cod)
+                serializer.save(exa_cod=examen)
+            except Examen.DoesNotExist:
+                serializer.save() # Fallback, let serializer handle error if exa_cod is missing and required
         else:
-            score = 0
-            
-        attempt.status = 'completed'
-        attempt.score_obtained = score
-        attempt.completed_at = timezone.now()
-        attempt.save()
-        
-        # Update user total_score if valid
-        if attempt.counts_for_score:
-            user = attempt.user
-            user.total_score += score
-            user.save()
-            user.update_rank()
-            
-        # Calculate correct answers count
-        correct_count = AttemptAnswer.objects.filter(attempt=attempt, is_correct=True).count()
-        total_questions = AttemptQuestion.objects.filter(attempt=attempt).count()
-        
-        # Calculate attempts left for scoring
-        attempts_count = Attempt.objects.filter(user=attempt.user, exam=attempt.exam).count()
-        attempts_left = max(0, attempt.exam.max_scored_attempts - attempts_count)
+            serializer.save()
 
-        return Response({
-            'score': score,
-            'correct_count': correct_count,
-            'total_questions': total_questions,
-            'status': attempt.status,
-            'counts_for_score': attempt.counts_for_score,
-            'attempts_left': attempts_left,
-            'total_user_score': attempt.user.total_score
-        })
-
-class QuestionViewSet(viewsets.ModelViewSet):
-    queryset = Question.objects.all()
-    serializer_class = QuestionSerializer
-    permission_classes = [IsStaff]
-    parser_classes = [MultiPartParser]
-
-    def get_queryset(self):
-        exam_id = self.request.query_params.get('exam_id')
-        if exam_id:
-            return Question.objects.filter(exam_id=exam_id).order_by('id')
-        return Question.objects.all()
-
-class OptionViewSet(viewsets.ModelViewSet):
-    from .serializers import OptionSerializer
-    queryset = Option.objects.all()
-    serializer_class = OptionSerializer
+class OpcionViewSet(viewsets.ModelViewSet):
+    queryset = Opcion.objects.all()
+    serializer_class = OpcionSerializer
     permission_classes = [IsStaff]
 
-    def get_queryset(self):
-        question_id = self.request.query_params.get('question_id')
-        if question_id:
-            return Option.objects.filter(question_id=question_id).order_by('id')
-        return Option.objects.all()
+    def perform_create(self, serializer):
+        # Inyectar pre_cod desde data o query params
+        pre_cod = self.request.data.get('pre_cod')
+        if not pre_cod:
+            pre_cod = self.request.query_params.get('pre_cod')
+        
+        if pre_cod:
+            try:
+                pregunta = Pregunta.objects.get(pre_cod=pre_cod)
+                serializer.save(pre_cod=pregunta)
+            except Pregunta.DoesNotExist:
+                serializer.save()
+        else:
+            serializer.save()
+class TipoPreguntaViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = TipoPregunta.objects.all().order_by('tip_pre_cod')
+    serializer_class = TipoPreguntaSerializer
+    permission_classes = [IsAuthenticated]

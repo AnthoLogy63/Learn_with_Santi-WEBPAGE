@@ -1,115 +1,95 @@
 from django.db import models
 from django.conf import settings
-from django.utils import timezone
+from users.models import Categoria, Competencia
 
-class Exam(models.Model):
-    name = models.CharField(max_length=200)
-    description = models.TextField(blank=True)
-    bank_total_questions = models.IntegerField(default=0)
-    questions_per_attempt = models.IntegerField(default=10)
-    max_scored_attempts = models.IntegerField(default=3)
-    max_points = models.IntegerField(default=100)
-    is_active = models.BooleanField(default=True)
-    is_enabled = models.BooleanField(default=True)
-    is_timed = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+class TipoPregunta(models.Model):
+    tip_pre_cod = models.IntegerField(primary_key=True)
+    tip_pre_nom = models.CharField(max_length=50)
 
     def __str__(self):
-        return self.name
+        return self.tip_pre_nom
 
-class Question(models.Model):
-    TYPE_CHOICES = (
-        ('single_choice', 'Single Choice'),
-        ('multiple_choice', 'Multiple Choice'),
-        ('open_ended', 'Open Ended'),
-    )
-    exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name='questions')
-    text = models.TextField()
-    image = models.ImageField(upload_to='questions/', null=True, blank=True)
-    points = models.IntegerField(default=10)
-    time_limit_seconds = models.IntegerField(default=60)
-    question_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='single_choice')
+class Examen(models.Model):
+    exa_cod = models.CharField(max_length=20, primary_key=True)
+    exa_nom = models.CharField(max_length=100)
+    exa_des = models.CharField(max_length=200, blank=True, null=True)
 
     def __str__(self):
-        return f"{self.exam.name} - {self.text[:50]} ({self.get_question_type_display()})"
+        return self.exa_nom
 
-class Option(models.Model):
-    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name='options')
-    text = models.CharField(max_length=255)
-    is_correct = models.BooleanField(default=False)
-
-    def __str__(self):
-        return f"{self.question.text[:30]} - {self.text[:20]}"
-
-class Attempt(models.Model):
-    STATUS_CHOICES = (
-        ('in_progress', 'In Progress'),
-        ('completed', 'Completed'),
-        ('expired', 'Expired'),
-    )
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='attempts')
-    exam = models.ForeignKey(Exam, on_delete=models.CASCADE)
-    attempt_number = models.IntegerField()
-    counts_for_score = models.BooleanField(default=False)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='in_progress')
-    score_obtained = models.IntegerField(default=0)
-    started_at = models.DateTimeField(auto_now_add=True)
-    last_activity_at = models.DateTimeField(auto_now=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
-
-    def save(self, *args, **kwargs):
-        if not self.pk:
-            # New attempt, set attempt number and check if it counts
-            previous_attempts = Attempt.objects.filter(user=self.user, exam=self.exam).count()
-            self.attempt_number = previous_attempts + 1
-            self.counts_for_score = self.attempt_number <= self.exam.max_scored_attempts
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return f"{self.user.username} - {self.exam.name} (Attempt {self.attempt_number})"
-
-class AttemptQuestion(models.Model):
-    attempt = models.ForeignKey(Attempt, on_delete=models.CASCADE, related_name='attempt_questions')
-    question = models.ForeignKey(Question, on_delete=models.CASCADE)
-    order_number = models.IntegerField()
+class CategoriaExamen(models.Model):
+    cat_cod = models.ForeignKey(Categoria, on_delete=models.CASCADE, db_column='cat_cod')
+    exa_cod = models.ForeignKey(Examen, on_delete=models.CASCADE, db_column='exa_cod')
 
     class Meta:
-        ordering = ['order_number']
-
-class AttemptAnswer(models.Model):
-    attempt = models.ForeignKey(Attempt, on_delete=models.CASCADE, related_name='answers')
-    question = models.ForeignKey(Question, on_delete=models.CASCADE)
-    selected_option = models.ForeignKey(Option, on_delete=models.SET_NULL, null=True, blank=True, related_name='selected_as_single')
-    selected_options = models.ManyToManyField(Option, blank=True, related_name='selected_as_multiple')
-    text_response = models.TextField(null=True, blank=True)
-    is_correct = models.BooleanField(default=False)
-    points_obtained = models.IntegerField(default=0)
-    answered_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ('attempt', 'question')
-
-    def save(self, *args, **kwargs):
-        # Update point calculation based on type
-        if self.question.question_type == 'single_choice':
-            if self.selected_option and self.selected_option.is_correct:
-                self.is_correct = True
-                self.points_obtained = self.question.points
-            else:
-                self.is_correct = False
-                self.points_obtained = 0
-        elif self.question.question_type == 'open_ended':
-            if self.text_response and len(self.text_response.strip()) > 0:
-                self.is_correct = True
-                self.points_obtained = self.question.points
-            else:
-                self.is_correct = False
-                self.points_obtained = 0
-        
-        # Multiple choice scoring is handled in the view because it requires M2M access 
-        # which isn't available until after save() if it's a new instance.
-        
-        super().save(*args, **kwargs)
+        unique_together = (('cat_cod', 'exa_cod'),)
 
     def __str__(self):
-        return f"Answer to {self.question.id} by {self.attempt.user.username}"
+        return f"{self.exa_cod_id} - {self.cat_cod_id}"
+
+class Pregunta(models.Model):
+    pre_cod = models.CharField(max_length=25, primary_key=True)
+    exa_cod = models.ForeignKey(Examen, on_delete=models.CASCADE, db_column='exa_cod')
+    tip_pre_cod = models.ForeignKey(TipoPregunta, on_delete=models.SET_NULL, null=True, blank=True, db_column='tip_pre_cod')
+    pre_tex = models.CharField(max_length=200)
+    pre_fot = models.ImageField(upload_to='questions/', blank=True, null=True)
+    pre_pun = models.IntegerField(default=0)
+    pre_tie = models.IntegerField(default=0)
+
+    def __str__(self):
+        return f"{self.pre_cod} ({self.exa_cod_id})"
+
+class Opcion(models.Model):
+    opc_cod = models.CharField(max_length=30, primary_key=True)
+    pre_cod = models.ForeignKey(Pregunta, on_delete=models.CASCADE, db_column='pre_cod', related_name='opciones')
+    opc_tex = models.CharField(max_length=100)
+    opc_cor = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.opc_cod} - {'Correcta' if self.opc_cor else 'Incorrecta'}"
+
+class Intento(models.Model):
+    int_cod = models.CharField(max_length=50, primary_key=True)
+    usu_cod = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, db_column='usu_cod', related_name='intentos')
+    exa_cod = models.ForeignKey(Examen, on_delete=models.CASCADE, db_column='exa_cod')
+    exa_num_int = models.IntegerField(default=1)
+    exa_fec_ini = models.DateTimeField(auto_now_add=True)
+    exa_fec_fin = models.DateTimeField(null=True, blank=True)
+    exa_pun_tot = models.IntegerField(default=0)
+
+    def __str__(self):
+        return f"{self.int_cod} ({self.usu_cod_id})"
+
+class Respuesta(models.Model):
+    res_cod = models.CharField(max_length=50, primary_key=True)
+    int_cod = models.ForeignKey(Intento, on_delete=models.CASCADE, db_column='int_cod', related_name='respuestas')
+    pre_cod = models.ForeignKey(Pregunta, on_delete=models.CASCADE, db_column='pre_cod')
+    opc_cod = models.ForeignKey(Opcion, on_delete=models.SET_NULL, null=True, blank=True, db_column='opc_cod')
+    res_tex = models.CharField(max_length=200, blank=True, null=True)
+    res_pun = models.IntegerField(default=0)
+    res_cor = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.res_cod} en intento {self.int_cod_id}"
+
+class PreguntaCompetencia(models.Model):
+    pre_cod = models.ForeignKey(Pregunta, on_delete=models.CASCADE, db_column='pre_cod')
+    com_cod = models.ForeignKey(Competencia, on_delete=models.CASCADE, db_column='com_cod')
+
+    class Meta:
+        unique_together = (('pre_cod', 'com_cod'),)
+
+    def __str__(self):
+        return f"{self.pre_cod_id} - {self.com_cod_id}"
+
+class ExamenCategoriaCompetencia(models.Model):
+    exa_cod = models.ForeignKey(Examen, on_delete=models.CASCADE, db_column='exa_cod')
+    cat_cod = models.ForeignKey(Categoria, on_delete=models.CASCADE, db_column='cat_cod')
+    com_cod = models.ForeignKey(Competencia, on_delete=models.CASCADE, db_column='com_cod')
+    num_preguntas = models.IntegerField(default=0)
+
+    class Meta:
+        unique_together = (('exa_cod', 'cat_cod', 'com_cod'),)
+
+    def __str__(self):
+        return f"{self.exa_cod_id} - {self.cat_cod_id} - {self.com_cod_id}: {self.num_preguntas} preg"

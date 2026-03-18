@@ -1,33 +1,40 @@
 from rest_framework import serializers
-from .models import User, Rank
+from .models import User, Rango, Categoria, Competencia
 
-
-class RankSerializer(serializers.ModelSerializer):
+class RangoSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Rank
+        model = Rango
         fields = '__all__'
 
+class CategoriaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Categoria
+        fields = '__all__'
+
+class CompetenciaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Competencia
+        fields = '__all__'
 
 class UserSerializer(serializers.ModelSerializer):
-    current_rank = RankSerializer(read_only=True)
+    ran_sig = RangoSerializer(read_only=True)
+    cat_cod = CategoriaSerializer(read_only=True)
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'dni', 'is_staff', 'total_score', 'current_rank']
-        read_only_fields = ['total_score', 'current_rank', 'is_staff']
-
+        fields = ['usu_cod', 'username', 'usu_dni', 'usu_nom', 'usu_sex', 'usu_edad', 'usu_pun_tot', 'cat_cod', 'ran_sig', 'is_staff']
+        read_only_fields = ['usu_pun_tot', 'ran_sig', 'cat_cod', 'is_staff']
 
 class UserListSerializer(serializers.ModelSerializer):
-    """Serializer extendido para listar usuarios en el panel admin."""
-    current_rank = RankSerializer(read_only=True)
-    last_login = serializers.DateTimeField(format="%d/%m/%Y %H:%M", read_only=True)
-    date_joined = serializers.DateTimeField(format="%d/%m/%Y", read_only=True)
+    ran_sig = RangoSerializer(read_only=True)
+    cat_cod = CategoriaSerializer(read_only=True)
+    usu_fec_ult = serializers.DateField(format="%d/%m/%Y", read_only=True)
+    usu_reg = serializers.DateField(format="%d/%m/%Y", read_only=True)
 
     class Meta:
         model = User
         fields = [
-            'id', 'username', 'first_name', 'last_name',
-            'dni', 'is_staff', 'is_active',
-            'total_score', 'current_rank',
-            'last_login', 'date_joined',
+            'usu_cod', 'username', 'usu_dni', 'usu_nom', 'usu_sex', 'usu_edad',
+            'usu_pun_tot', 'ran_sig', 'cat_cod',
+            'usu_fec_ult', 'usu_reg', 'is_staff'
         ]
