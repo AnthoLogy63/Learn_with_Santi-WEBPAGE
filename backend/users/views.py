@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status, viewsets
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.parsers import MultiPartParser
-from django.contrib.auth import authenticate, login
+from django.contrib.auth import authenticate
 from django.utils import timezone
 from datetime import timedelta
 import openpyxl
@@ -31,7 +31,6 @@ class LoginView(APIView):
         # Autenticación estándar para todos los usuarios
         user = authenticate(request, username=username, password=dni)
         if user:
-            login(request, user)
             serializer = UserSerializer(user)
             return Response(serializer.data)
         else:
