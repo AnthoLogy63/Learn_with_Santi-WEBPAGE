@@ -1,61 +1,124 @@
 from rest_framework import serializers
-from .models import Exam, Question, Option, Attempt, AttemptQuestion, AttemptAnswer
+from .models import TipoPregunta, Examen, CategoriaExamen, Pregunta, Opcion, Intento, Respuesta
 
-class OptionSerializer(serializers.ModelSerializer):
+class TipoPreguntaSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Option
-        fields = ['id', 'question', 'text', 'is_correct']
+        model = TipoPregunta
+        fields = '__all__'
 
-class QuestionSerializer(serializers.ModelSerializer):
-    options = OptionSerializer(many=True, read_only=True)
-
+class CategoriaExamenSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Question
-        fields = ['id', 'exam', 'text', 'image', 'options', 'points', 'time_limit_seconds', 'question_type']
+        model = CategoriaExamen
+        fields = '__all__'
 
-class ExamSerializer(serializers.ModelSerializer):
+class OpcionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Opcion
+        fields = ['opc_cod', 'pre_cod', 'opc_tex', 'opc_cor']
+        extra_kwargs = {
+            'opc_cod': {'required': False},
+        }
+
+    def create(self, validated_data):
+        if 'opc_cod' not in validated_data or not validated_data['opc_cod']:
+            import uuid
+            validated_data['opc_cod'] = 'OPC_' + uuid.uuid4().hex[:15].upper()
+        return super().create(validated_data)
+
+class PreguntaSerializer(serializers.ModelSerializer):
+    com_cod = serializers.SerializerMethodField()
+    options = OpcionSerializer(many=True, required=False, source='opciones')
+    
+    class Meta:
+        model = Pregunta
+        fields = ['pre_cod', 'exa_cod', 'tip_pre_cod', 'pre_tex', 'pre_fot', 'pre_pun', 'pre_tie', 'options', 'com_cod']
+        extra_kwargs = {
+            'pre_cod': {'required': False},
+            'exa_cod': {'required': False},
+            'tip_pre_cod': {'required': False, 'allow_null': True},
+            'pre_fot': {'required': False, 'allow_null': True},
+        }
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        # Limpiar la URL de la foto si es necesario
+        if instance.pre_fot:
+            val = str(instance.pre_fot)
+            # Si es una URL completa guardada por error, extraer el path relativo
+            if val.startswith('http://') or val.startswith('https://'):
+                from urllib.parse import urlparse
+                path = urlparse(val).path
+                if path.startswith('/media/'):
+                    ret['pre_fot'] = path
+                else:
+                    ret['pre_fot'] = f"/media/{path.lstrip('/')}"
+            elif not val.startswith('/'):
+                ret['pre_fot'] = f"/media/{val}"
+            else:
+                ret['pre_fot'] = val
+        return ret
+
+    def get_com_cod(self, obj):
+        from .models import PreguntaCompetencia
+        pc = PreguntaCompetencia.objects.filter(pre_cod=obj).first()
+        return pc.com_cod_id if pc else None
+
+    def create(self, validated_data):
+        if 'pre_cod' not in validated_data or not validated_data['pre_cod']:
+            import uuid
+            validated_data['pre_cod'] = 'PRE_' + uuid.uuid4().hex[:12].upper()
+        return super().create(validated_data)
+
+class ExamenSerializer(serializers.ModelSerializer):
     status = serializers.SerializerMethodField()
     last_score = serializers.SerializerMethodField()
-    attempts_left = serializers.SerializerMethodField()
 
     class Meta:
-        model = Exam
-        fields = ['id', 'name', 'description', 'bank_total_questions', 'questions_per_attempt', 'max_scored_attempts', 'max_points', 'is_active', 'is_enabled', 'is_timed', 'status', 'last_score', 'attempts_left']
+        model = Examen
+        fields = ['exa_cod', 'exa_nom', 'exa_des', 'status', 'last_score']
+        extra_kwargs = {'exa_cod': {'required': False}}
+
+    def __init__(self, *args, **kwargs):
+        # Optimización: No calcular status/score si el contexto indica que es para una lista administrativa rápida
+        simple = kwargs.pop('simple', False)
+        super().__init__(*args, **kwargs)
+        if simple:
+            self.fields.pop('status', None)
+            self.fields.pop('last_score', None)
+
+    def create(self, validated_data):
+        if 'exa_cod' not in validated_data or not validated_data['exa_cod']:
+            import uuid
+            validated_data['exa_cod'] = 'EX_' + uuid.uuid4().hex[:8].upper()
+        return super().create(validated_data)
 
     def get_status(self, obj):
         user = self.context['request'].user
-        if Attempt.objects.filter(user=user, exam=obj, status='completed').exists():
+        if Intento.objects.filter(usu_cod=user, exa_cod=obj, exa_fec_fin__isnull=False).exists():
             return 'completed'
         return 'pending'
 
     def get_last_score(self, obj):
         user = self.context['request'].user
-        # Best of the first 3 attempts
-        best_attempt = Attempt.objects.filter(
-            user=user, 
-            exam=obj, 
-            status='completed',
-            counts_for_score=True
-        ).order_by('-score_obtained').first()
+        best_attempt = Intento.objects.filter(
+            usu_cod=user, 
+            exa_cod=obj, 
+            exa_fec_fin__isnull=False
+        ).order_by('-exa_pun_tot').first()
         if best_attempt:
-            return best_attempt.score_obtained
+            return best_attempt.exa_pun_tot
         return None
-    
-    def get_attempts_left(self, obj):
-        user = self.context['request'].user
-        attempts_count = Attempt.objects.filter(user=user, exam=obj).count()
-        return max(0, obj.max_scored_attempts - attempts_count)
 
-class AttemptAnswerSerializer(serializers.ModelSerializer):
+class RespuestaSerializer(serializers.ModelSerializer):
     class Meta:
-        model = AttemptAnswer
-        fields = ['question', 'selected_option', 'selected_options', 'text_response', 'is_correct', 'points_obtained', 'answered_at']
-        read_only_fields = ['is_correct', 'points_obtained', 'answered_at']
+        model = Respuesta
+        fields = ['res_cod', 'int_cod', 'pre_cod', 'opc_cod', 'res_tex', 'res_pun', 'res_cor']
+        read_only_fields = ['res_pun', 'res_cor']
 
-class AttemptSerializer(serializers.ModelSerializer):
-    answers = AttemptAnswerSerializer(many=True, read_only=True)
+class IntentoSerializer(serializers.ModelSerializer):
+    respuestas = RespuestaSerializer(many=True, read_only=True)
     
     class Meta:
-        model = Attempt
-        fields = ['id', 'user', 'exam', 'attempt_number', 'counts_for_score', 'status', 'score_obtained', 'started_at', 'completed_at', 'answers']
-        read_only_fields = ['user', 'attempt_number', 'counts_for_score', 'status', 'score_obtained', 'completed_at']
+        model = Intento
+        fields = ['int_cod', 'usu_cod', 'exa_cod', 'exa_num_int', 'exa_fec_ini', 'exa_fec_fin', 'exa_pun_tot', 'respuestas']
+        read_only_fields = ['usu_cod', 'exa_num_int', 'exa_pun_tot', 'exa_fec_fin']
