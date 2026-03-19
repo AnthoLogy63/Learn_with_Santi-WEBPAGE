@@ -224,6 +224,17 @@ export const examService = {
         });
     },
 
+    getStatsSummary: async () => {
+        return apiClient(`/exams/stats_summary/`);
+    },
+
+    exportResults: async (exa_cod: string | number) => {
+        const res = await fetch(`${API_URL}/exams/${exa_cod}/export_results/`, {
+            headers: { ...getAuthHeader() },
+        });
+        return res;
+    },
+
     downloadTemplate: async () => {
         const res = await fetch(`${API_URL}/exams/template/`, {
             headers: { ...getAuthHeader() },

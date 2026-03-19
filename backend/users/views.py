@@ -111,82 +111,89 @@ class ImportUsersView(APIView):
         actualizados = 0
         errores = []
 
-        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-            if all(cell is None or str(cell).strip() == '' for cell in row):
-                continue
-
-            try:
-                # Extraer y limpiar valores de forma segura
-                def get_val(key, default=''):
-                    v = row[idx[key]] if idx[key] is not None else None
-                    if v is None: return default
-                    return str(v).strip()
-
-                username_val = get_val('username')
-                dni_val = get_val('dni')
-                nombre_val = get_val('nombre_completo')
-                genero_val = get_val('genero').upper() if get_val('genero') else None
-                
-                try:
-                    edad_val = int(row[idx['edad']]) if idx['edad'] is not None and row[idx['edad']] is not None else 0
-                except (ValueError, TypeError): edad_val = 0
-                
-                zona_val = get_val('zona', None)
-                
-                try:
-                    age_val = int(row[idx['antiguedad']]) if idx['antiguedad'] is not None and row[idx['antiguedad']] is not None else 0
-                except (ValueError, TypeError): age_val = 0
-                
-                cat_val = get_val('categoria', None)
-
-                if not dni_val or not username_val:
-                    errores.append({'fila': row_idx, 'motivo': 'DNI o username vacío'})
+        try:
+            for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                if all(cell is None or str(cell).strip() == '' for cell in row):
                     continue
-                
-                # Mapear Género
-                usu_sex = None
-                if genero_val:
-                    if 'MASC' in genero_val: usu_sex = 'M'
-                    elif 'FEM' in genero_val: usu_sex = 'F'
-                
-                # Mapear Categoría (Búsqueda por CÓDIGO)
-                cat_obj = None
-                if cat_val:
-                    from .models import Categoria
-                    cat_obj = Categoria.objects.filter(cat_cod=cat_val).first()
 
-                defaults = {
-                    'username': username_val,
-                    'usu_cod': username_val,
-                    'usu_nom': nombre_val,
-                    'usu_sex': usu_sex,
-                    'usu_edad': edad_val,
-                    'usu_zon': zona_val,
-                    'usu_age': age_val,
-                    'cat_cod': cat_obj
-                }
+                try:
+                    # Extraer y limpiar valores de forma segura
+                    def get_val(key, default=''):
+                        v = row[idx[key]] if idx[key] is not None else None
+                        if v is None: return default
+                        return str(v).strip()
 
-                user, created = User.objects.update_or_create(
-                    usu_dni=dni_val,
-                    defaults=defaults
-                )
-                
-                if created:
-                    user.set_password(dni_val)
-                    user.save()
-                    creados += 1
-                else:
-                    actualizados += 1
+                    username_val = get_val('username')
+                    dni_val = get_val('dni')
+                    nombre_val = get_val('nombre_completo')
+                    genero_val = get_val('genero').upper() if get_val('genero') else None
+                    
+                    try:
+                        edad_val = int(row[idx['edad']]) if idx['edad'] is not None and row[idx['edad']] is not None else 0
+                    except (ValueError, TypeError): edad_val = 0
+                    
+                    zona_val = get_val('zona', None)
+                    
+                    try:
+                        age_val = int(row[idx['antiguedad']]) if idx['antiguedad'] is not None and row[idx['antiguedad']] is not None else 0
+                    except (ValueError, TypeError): age_val = 0
+                    
+                    cat_val = get_val('categoria', None)
 
-            except Exception as e:
-                errores.append({'fila': row_idx, 'motivo': str(e)})
+                    if not dni_val or not username_val:
+                        errores.append({'fila': row_idx, 'motivo': 'DNI o username vacío'})
+                        continue
+                    
+                    # Mapear Género
+                    usu_sex = None
+                    if genero_val:
+                        if 'MASC' in genero_val: usu_sex = 'M'
+                        elif 'FEM' in genero_val: usu_sex = 'F'
+                    
+                    # Mapear Categoría (Búsqueda por CÓDIGO)
+                    cat_obj = None
+                    if cat_val:
+                        from .models import Categoria
+                        cat_obj = Categoria.objects.filter(cat_cod=cat_val).first()
 
-        return Response({
-            'creados': creados,
-            'actualizados': actualizados,
-            'errores': errores,
-            'total_procesados': creados + actualizados,
-        }, status=status.HTTP_200_OK)
+                    defaults = {
+                        'username': username_val,
+                        'usu_cod': username_val,
+                        'usu_nom': nombre_val,
+                        'usu_sex': usu_sex,
+                        'usu_edad': edad_val,
+                        'usu_zon': zona_val,
+                        'usu_age': age_val,
+                        'cat_cod': cat_obj
+                    }
+
+                    user, created = User.objects.update_or_create(
+                        usu_dni=dni_val,
+                        defaults=defaults
+                    )
+                    
+                    if created:
+                        user.set_password(dni_val)
+                        user.save()
+                        creados += 1
+                    else:
+                        actualizados += 1
+
+                except Exception as e:
+                    errores.append({'fila': row_idx, 'motivo': str(e)})
+
+            return Response({
+                'creados': creados,
+                'actualizados': actualizados,
+                'errores': errores,
+                'total_procesados': creados + actualizados,
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response(
+                {'error': 'Error durante el procesamiento del archivo.', 'detail': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class ExportUserTemplateView(APIView):

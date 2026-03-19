@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { X, Save, Eye, Plus, Loader2, HelpCircle } from "lucide-react";
-import { examService, Exam, LocalQuestion, LocalOption, TipoPregunta } from "@/api/examService";
+import { examService, Exam, LocalQuestion, LocalOption, TipoPregunta, Competencia } from "@/api/examService";
 import { toast } from "sonner";
 import AdminExamPreview from "./AdminExamPreview";
 import ExamConfig, { CategoryConfig } from "./ExamConfig";
@@ -139,6 +139,11 @@ const ExamEditor = ({ exa_cod, onClose, onSaveSuccess }: ExamEditorProps) => {
             if (!res.ok) throw new Error("Error en el guardado masivo");
 
             const updateData = await res.json();
+            
+            // Sincronizar configuración si el servidor la devuelve
+            if (updateData.config) {
+                setConfig(updateData.config);
+            }
             
             // 2. Procesar imágenes pendientes (solo si hay archivos temporales)
             // Creamos un mapa de las preguntas actualizadas del servidor para facilitar la búsqueda

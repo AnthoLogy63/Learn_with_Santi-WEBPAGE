@@ -22,7 +22,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['usu_cod', 'username', 'usu_dni', 'usu_nom', 'usu_sex', 'usu_edad', 'usu_pun_tot', 'cat_cod', 'ran_sig', 'is_staff']
+        fields = ['usu_cod', 'username', 'usu_dni', 'usu_nom', 'usu_sex', 'usu_edad', 'usu_pun_tot', 'cat_cod', 'ran_sig', 'usu_zon', 'usu_age', 'is_staff']
         read_only_fields = ['usu_pun_tot', 'ran_sig', 'cat_cod', 'is_staff']
 
 class UserListSerializer(serializers.ModelSerializer):
@@ -35,6 +35,6 @@ class UserListSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'usu_cod', 'username', 'usu_dni', 'usu_nom', 'usu_sex', 'usu_edad',
-            'usu_pun_tot', 'ran_sig', 'cat_cod',
+            'usu_pun_tot', 'ran_sig', 'cat_cod', 'usu_zon', 'usu_age',
             'usu_fec_ult', 'usu_reg', 'is_staff'
         ]

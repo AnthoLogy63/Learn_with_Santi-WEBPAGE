@@ -41,18 +41,13 @@ class PreguntaSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
-        # Limpiar la URL de la foto si es necesario
         if instance.pre_fot:
             val = str(instance.pre_fot)
-            # Si es una URL completa guardada por error, extraer el path relativo
+            # Si ya es una URL absoluta (Cloudinary u otro CDN), devolverla tal cual
             if val.startswith('http://') or val.startswith('https://'):
-                from urllib.parse import urlparse
-                path = urlparse(val).path
-                if path.startswith('/media/'):
-                    ret['pre_fot'] = path
-                else:
-                    ret['pre_fot'] = f"/media/{path.lstrip('/')}"
+                ret['pre_fot'] = val
             elif not val.startswith('/'):
+                # Ruta relativa: agregar /media/
                 ret['pre_fot'] = f"/media/{val}"
             else:
                 ret['pre_fot'] = val

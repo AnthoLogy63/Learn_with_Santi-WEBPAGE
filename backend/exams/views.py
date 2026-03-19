@@ -7,9 +7,9 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from django.db import transaction
+from django.db import transaction, models
+from django.db.models import Avg, Count, Sum, Max, Q
 from django.utils import timezone
-from django.db import models
 from django.contrib.auth import get_user_model
 from .models import TipoPregunta, Examen, CategoriaExamen, Pregunta, Opcion, Intento, Respuesta, PreguntaCompetencia, ExamenCategoriaCompetencia
 from users.models import Categoria, Competencia
@@ -110,90 +110,97 @@ class ImportExamView(APIView):
         creadas = 0
         errores = []
 
-        with transaction.atomic():
-            for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-                if not any(row): continue
-                
-                try:
-                    # Extraer valores de forma segura
-                    def get_val(key, default=''):
-                        v = row[idx[key]] if idx[key] is not None else None
-                        if v is None: return default
-                        return str(v).strip()
-
-                    cat_val = get_val('categoria', None)
-                    com_val = get_val('competencia', None)
-                    pre_val = get_val('pregunta')
+        try:
+            with transaction.atomic():
+                for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                    if not any(row): continue
                     
-                    try: pun_val = int(row[idx['puntos']]) if idx['puntos'] is not None and row[idx['puntos']] else 10
-                    except: pun_val = 10
-                    
-                    try: tie_val = int(row[idx['tiempo']]) if idx['tiempo'] is not None and row[idx['tiempo']] else 60
-                    except: tie_val = 60
-                    
-                    try: tipo_val = int(row[idx['tipo']]) if idx['tipo'] is not None and row[idx['tipo']] else 1
-                    except: tipo_val = 1
-                    
-                    correcta_idx = get_val('correcta')
+                    try:
+                        # Extraer valores de forma segura
+                        def get_val(key, default=''):
+                            v = row[idx[key]] if idx[key] is not None else None
+                            if v is None: return default
+                            return str(v).strip()
 
-                    if not pre_val: continue
+                        cat_val = get_val('categoria', None)
+                        com_val = get_val('competencia', None)
+                        pre_val = get_val('pregunta')
+                        
+                        try: pun_val = int(row[idx['puntos']]) if idx['puntos'] is not None and row[idx['puntos']] else 10
+                        except: pun_val = 10
+                        
+                        try: tie_val = int(row[idx['tiempo']]) if idx['tiempo'] is not None and row[idx['tiempo']] else 60
+                        except: tie_val = 60
+                        
+                        try: tipo_val = int(row[idx['tipo']]) if idx['tipo'] is not None and row[idx['tipo']] else 1
+                        except: tipo_val = 1
+                        
+                        correcta_idx = get_val('correcta')
 
-                    # 1. Manejar Categoría vinculada al examen (Búsqueda por CÓDIGO)
-                    if cat_val:
-                        categoria = Categoria.objects.filter(cat_cod=cat_val).first()
-                        if categoria:
-                            CategoriaExamen.objects.get_or_create(exa_cod=exam, cat_cod=categoria)
-                    else:
-                        categoria = None
+                        if not pre_val: continue
 
-                    # 2. Manejar Competencia (Búsqueda por CÓDIGO)
-                    if com_val:
-                        competencia = Competencia.objects.filter(com_cod=com_val).first()
-                        # Si hay categoría y competencia, asegurar config en ExamenCategoriaCompetencia
-                        if categoria and competencia:
-                            ExamenCategoriaCompetencia.objects.get_or_create(
-                                exa_cod=exam, cat_cod=categoria, com_cod=competencia
-                            )
-                    else:
-                        competencia = None
+                        # 1. Manejar Categoría vinculada al examen (Búsqueda por CÓDIGO)
+                        if cat_val:
+                            categoria = Categoria.objects.filter(cat_cod=cat_val).first()
+                            if categoria:
+                                CategoriaExamen.objects.get_or_create(exa_cod=exam, cat_cod=categoria)
+                        else:
+                            categoria = None
 
-                    # 3. Crear Pregunta
-                    p_cod = f"PRE_{uuid.uuid4().hex[:12].upper()}"
-                    pregunta = Pregunta.objects.create(
-                        pre_cod=p_cod,
-                        exa_cod=exam,
-                        pre_tex=pre_val,
-                        pre_pun=pun_val,
-                        pre_tie=tie_val,
-                        tip_pre_cod_id=tipo_val
-                    )
+                        # 2. Manejar Competencia (Búsqueda por CÓDIGO)
+                        if com_val:
+                            competencia = Competencia.objects.filter(com_cod=com_val).first()
+                            # Si hay categoría y competencia, asegurar config en ExamenCategoriaCompetencia
+                            if categoria and competencia:
+                                ExamenCategoriaCompetencia.objects.get_or_create(
+                                    exa_cod=exam, cat_cod=categoria, com_cod=competencia
+                                )
+                        else:
+                            competencia = None
 
-                    # 4. Vincular Pregunta a Competencia si existe
-                    if competencia:
-                        PreguntaCompetencia.objects.get_or_create(pre_cod=pregunta, com_cod=competencia)
+                        # 3. Crear Pregunta
+                        p_cod = f"PRE_{uuid.uuid4().hex[:12].upper()}"
+                        pregunta = Pregunta.objects.create(
+                            pre_cod=p_cod,
+                            exa_cod=exam,
+                            pre_tex=pre_val,
+                            pre_pun=pun_val,
+                            pre_tie=tie_val,
+                            tip_pre_cod_id=tipo_val
+                        )
 
-                    # 5. Crear Opciones (Soportamos hasta 10 columnas para Relación)
-                    for o_idx in range(1, 11):
-                        key = f'opc{o_idx}'
-                        if idx[key] is not None and row[idx[key]]:
-                            Opcion.objects.create(
-                                opc_cod=f"OPC_{uuid.uuid4().hex[:15].upper()}",
-                                pre_cod=pregunta,
-                                opc_tex=str(row[idx[key]]).strip(),
-                                opc_cor=(str(o_idx) == correcta_idx)
-                            )
-                    
-                    creadas += 1
+                        # 4. Vincular Pregunta a Competencia si existe
+                        if competencia:
+                            PreguntaCompetencia.objects.get_or_create(pre_cod=pregunta, com_cod=competencia)
 
-                except Exception as e:
-                    errores.append({'fila': row_idx, 'error': str(e)})
+                        # 5. Crear Opciones (Soportamos hasta 10 columnas para Relación)
+                        for o_idx in range(1, 11):
+                            key = f'opc{o_idx}'
+                            if idx[key] is not None and row[idx[key]]:
+                                Opcion.objects.create(
+                                    opc_cod=f"OPC_{uuid.uuid4().hex[:15].upper()}",
+                                    pre_cod=pregunta,
+                                    opc_tex=str(row[idx[key]]).strip(),
+                                    opc_cor=(str(o_idx) == correcta_idx)
+                                )
+                        
+                        creadas += 1
 
-        return Response({
-            'status': 'completado',
-            'exa_cod': exam.exa_cod,
-            'preguntas_creadas': creadas,
-            'errores': errores
-        }, status=status.HTTP_200_OK if not errores else status.HTTP_207_MULTI_STATUS)
+                    except Exception as e:
+                        errores.append({'fila': row_idx, 'error': str(e)})
+
+            return Response({
+                'status': 'completado',
+                'exa_cod': exam.exa_cod,
+                'preguntas_creadas': creadas,
+                'errores': errores
+            }, status=status.HTTP_200_OK if not errores else status.HTTP_207_MULTI_STATUS)
+
+        except Exception as e:
+            return Response(
+                {'error': 'Error crítico durante la importación.', 'detail': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class ExportExamTemplateView(APIView):
@@ -541,10 +548,9 @@ class ExamenViewSet(viewsets.ModelViewSet):
                     if com_cod:
                         try:
                             competencia = Competencia.objects.get(com_cod=com_cod)
-                            PreguntaCompetencia.objects.update_or_create(
-                                pre_cod=pregunta,
-                                defaults={'com_cod': competencia}
-                            )
+                            # Borramos la asignación anterior (puede haber duplicados) y recreamos
+                            PreguntaCompetencia.objects.filter(pre_cod=pregunta).delete()
+                            PreguntaCompetencia.objects.create(pre_cod=pregunta, com_cod=competencia)
                         except Competencia.DoesNotExist:
                             pass
                     else:
@@ -594,7 +600,8 @@ class ExamenViewSet(viewsets.ModelViewSet):
                         if not cat_cod: continue
 
                         try:
-                            categoria = Categoria.objects.get(cat_cod=cat_cod)
+                            # Asegurar cat_cod sea string por si viene como número
+                            categoria = Categoria.objects.get(cat_cod=str(cat_cod))
                             # Vincular categoría al examen
                             CategoriaExamen.objects.get_or_create(exa_cod=examen, cat_cod=categoria)
 
@@ -602,16 +609,21 @@ class ExamenViewSet(viewsets.ModelViewSet):
                             comp_configs = c_item.get('competencies', [])
                             for co_conf in comp_configs:
                                 com_cod = co_conf.get('com_cod')
-                                num_preg = co_conf.get('num_preguntas', 0)
+                                # Convertir num_preguntas a int por seguridad
+                                try:
+                                    num_preg = int(co_conf.get('num_preguntas', 0))
+                                except (ValueError, TypeError):
+                                    num_preg = 0
+                                    
                                 if not com_cod: continue
 
                                 try:
-                                    competencia = Competencia.objects.get(com_cod=com_cod)
-                                    ExamenCategoriaCompetencia.objects.create(
+                                    competencia = Competencia.objects.get(com_cod=str(com_cod))
+                                    ExamenCategoriaCompetencia.objects.update_or_create(
                                         exa_cod=examen,
                                         cat_cod=categoria,
                                         com_cod=competencia,
-                                        num_preguntas=num_preg
+                                        defaults={'num_preguntas': num_preg}
                                     )
                                 except Competencia.DoesNotExist:
                                     continue
@@ -620,11 +632,27 @@ class ExamenViewSet(viewsets.ModelViewSet):
 
             # Aseguramos devolver todo el estado fresco para sincronizar el frontend
             updated_questions = Pregunta.objects.filter(exa_cod=examen).prefetch_related('opciones')
+            
+            # Obtener configuración final para devolverla
+            final_config = []
+            categorias_ids = CategoriaExamen.objects.filter(exa_cod=examen).values_list('cat_cod', flat=True)
+            for cat_id in categorias_ids:
+                competencias = ExamenCategoriaCompetencia.objects.filter(exa_cod=examen, cat_cod=cat_id)
+                final_config.append({
+                    'cat_cod': cat_id,
+                    'competencies': [
+                        {
+                            'com_cod': comp.com_cod_id,
+                            'num_preguntas': comp.num_preguntas
+                        } for comp in competencias
+                    ]
+                })
 
             return Response({
                 'status': 'ok',
                 'exam': ExamenSerializer(examen, context={'request': request}).data,
-                'questions': PreguntaSerializer(updated_questions, many=True, context={'request': request}).data
+                'questions': PreguntaSerializer(updated_questions, many=True, context={'request': request}).data,
+                'config': final_config
             })
 
         except Exception as e:
@@ -655,6 +683,86 @@ class ExamenViewSet(viewsets.ModelViewSet):
             })
             
         return Response(config)
+
+    @action(detail=False, methods=['get'], permission_classes=[IsStaff])
+    def stats_summary(self, request):
+        """Estadísticas globales por examen para el dashboard."""
+        examenes = Examen.objects.all()
+        data = []
+        
+        for exa in examenes:
+            intentos = Intento.objects.filter(exa_cod=exa, exa_fec_fin__isnull=False)
+            total_intentos = intentos.count()
+            
+            # Promedio de puntaje (normalizado a %)
+            avg_score = intentos.aggregate(Avg('exa_pun_tot'))['exa_pun_tot__avg'] or 0
+            # Suponiendo que el puntaje máximo es la suma de puntos de sus preguntas
+            max_posible = Pregunta.objects.filter(exa_cod=exa).aggregate(Sum('pre_pun'))['pre_pun__sum'] or 1
+            avg_percent = round((avg_score / max_posible) * 100, 1) if max_posible > 0 else 0
+            
+            # Estadísticas por pregunta
+            preguntas = Pregunta.objects.filter(exa_cod=exa)
+            question_stats = []
+            for pre in preguntas:
+                respuestas_pre = Respuesta.objects.filter(pre_cod=pre, int_cod__exa_fec_fin__isnull=False)
+                total_res = respuestas_pre.count()
+                correctas = respuestas_pre.filter(res_cor=True).count()
+                percent_correct = round((correctas / total_res * 100), 1) if total_res > 0 else 0
+                
+                # Distribución de opciones
+                choices = []
+                opciones = Opcion.objects.filter(pre_cod=pre)
+                for opc in opciones:
+                    count_opc = respuestas_pre.filter(opc_cod=opc).count()
+                    choices.append({
+                        'text': opc.opc_tex,
+                        'count': count_opc,
+                        'percent': round((count_opc / total_res * 100), 1) if total_res > 0 else 0,
+                        'is_correct': opc.opc_cor
+                    })
+                
+                question_stats.append({
+                    'text': pre.pre_tex,
+                    'percent': percent_correct,
+                    'choices': choices
+                })
+                
+            data.append({
+                'id': exa.exa_cod,
+                'name': exa.exa_nom,
+                'total_attempts': total_intentos,
+                'avg_score': avg_percent,
+                'question_stats': question_stats
+            })
+            
+        return Response(data)
+
+    @action(detail=True, methods=['get'], permission_classes=[IsStaff])
+    def export_results(self, request, pk=None):
+        """Exporta resultados de un examen a CSV."""
+        import csv
+        from django.http import HttpResponse
+        
+        examen = self.get_object()
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="resultados_{examen.exa_cod}.csv"'
+        
+        writer = csv.writer(response)
+        writer.writerow(['USUARIO', 'NOMBRE', 'DNI', 'FECHA', 'INTENTO', 'PUNTOS', 'ESTADO'])
+        
+        intentos = Intento.objects.filter(exa_cod=examen).select_related('usu_cod').order_by('-exa_fec_ini')
+        for int_obj in intentos:
+            writer.writerow([
+                int_obj.usu_cod.username,
+                int_obj.usu_cod.usu_nom,
+                int_obj.usu_cod.usu_dni,
+                int_obj.exa_fec_ini.strftime('%d/%m/%Y %H:%M'),
+                int_obj.exa_num_int,
+                int_obj.exa_pun_tot,
+                'Finalizado' if int_obj.exa_fec_fin else 'En progreso'
+            ])
+            
+        return response
 
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def finish_attempt(self, request, pk=None):
@@ -717,6 +825,65 @@ class IntentoViewSet(viewsets.ReadOnlyModelViewSet):
         if self.request.user.is_staff:
             return Intento.objects.all()
         return Intento.objects.filter(usu_cod=self.request.user)
+
+    @action(detail=False, methods=['get'], permission_classes=[IsStaff])
+    def user_results(self, request):
+        """Lista de usuarios con sus intentos para el Dashboard."""
+        search = request.query_params.get('search', '')
+        offset = int(request.query_params.get('offset', 0))
+        limit = 10
+        
+        UserModel = get_user_model()
+        users_qs = UserModel.objects.filter(is_staff=False)
+        
+        if search:
+            users_qs = users_qs.filter(
+                Q(username__icontains=search) | 
+                Q(usu_nom__icontains=search) | 
+                Q(usu_dni__icontains=search)
+            )
+            
+        total_count = users_qs.count()
+        users_page = users_qs[offset:offset+limit]
+        
+        results = []
+        for user in users_page:
+            # Obtener intentos
+            intentos = Intento.objects.filter(usu_cod=user).order_by('-exa_fec_ini')
+            attempts_data = []
+            
+            for att in intentos:
+                # Obtener respuestas resumidas
+                respuestas = Respuesta.objects.filter(int_cod=att).select_related('pre_cod', 'opc_cod')
+                answers_data = []
+                for res in respuestas:
+                    answers_data.append({
+                        'question': res.pre_cod.pre_tex,
+                        'selected': res.opc_cod.opc_tex if res.opc_cod else (res.res_tex or 'Sin respuesta'),
+                        'is_correct': res.res_cor
+                    })
+                
+                attempts_data.append({
+                    'exam_id': att.exa_cod.exa_cod,
+                    'exam_name': att.exa_cod.exa_nom,
+                    'score': att.exa_pun_tot,
+                    'date': att.exa_fec_ini,
+                    'attempt_number': att.exa_num_int,
+                    'counts_for_score': True, # Lógica simplificada
+                    'answers': answers_data
+                })
+                
+            results.append({
+                'id': user.usu_cod,
+                'username': user.username,
+                'total_score': user.usu_pun_tot,
+                'attempts': attempts_data
+            })
+            
+        return Response({
+            'results': results,
+            'has_more': offset + limit < total_count
+        })
 
 class PreguntaViewSet(viewsets.ModelViewSet):
     queryset = Pregunta.objects.all()
