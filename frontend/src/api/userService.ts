@@ -37,7 +37,14 @@ export interface CleanupResult {
     mensaje: string;
 }
 
+/**
+ * Servicio para gestionar las operaciones relacionadas con los usuarios.
+ */
 export const userService = {
+    /**
+     * Realiza el login del usuario enviando username y dni.
+     * No utiliza apiClient porque aún no tenemos las credenciales para el Basic Auth.
+     */
     login: async (username: string, dni: string) => {
         const response = await fetch(`${API_URL}/users/login/`, {
             method: 'POST',
@@ -47,14 +54,23 @@ export const userService = {
         return response;
     },
 
+    /**
+     * Obtiene los datos detallados y puntaje de un usuario específico.
+     */
     getUserScore: async (usu_cod: string) => {
         return apiClient(`/users/score/${usu_cod}/`);
     },
 
+    /**
+     * Lista todos los usuarios (requiere permisos de Admin/Staff).
+     */
     listUsers: async () => {
         return apiClient(`/users/list/`);
     },
 
+    /**
+     * Sube un archivo Excel para importar o actualizar usuarios de forma masiva.
+     */
     importUsers: async (file: File) => {
         const form = new FormData();
         form.append('file', file);
@@ -65,6 +81,9 @@ export const userService = {
         });
     },
 
+    /**
+     * Limpia o resetea puntos de usuarios inactivos basándose en meses de inactividad.
+     */
     cleanupInactive: async (months: number, deleteUsers: boolean) => {
         return apiClient(`/users/cleanup/`, {
             method: 'POST',
@@ -73,10 +92,16 @@ export const userService = {
         });
     },
 
+    /**
+     * Obtiene el ranking global de usuarios y la posición del usuario actual.
+     */
     getRanking: async () => {
         return apiClient(`/users/ranking/`);
     },
 
+    /**
+     * Descarga la plantilla de Excel oficial para la importación de usuarios.
+     */
     downloadTemplate: async () => {
         const res = await fetch(`${API_URL}/users/template/`, {
             headers: { ...getAuthHeader() },

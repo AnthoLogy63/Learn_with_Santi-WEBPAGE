@@ -11,6 +11,8 @@ from django.db import transaction, models
 from django.db.models import Avg, Count, Sum, Max, Q
 from django.utils import timezone
 from django.contrib.auth import get_user_model
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, inline_serializer, OpenApiExample
+from rest_framework import serializers
 from .models import TipoPregunta, Examen, CategoriaExamen, Pregunta, Opcion, Intento, Respuesta, PreguntaCompetencia, ExamenCategoriaCompetencia
 from users.models import Categoria, Competencia
 from .serializers import (
@@ -26,6 +28,48 @@ class IsStaff(IsAuthenticated):
 UserModel = get_user_model()
 
 
+@extend_schema(
+    summary="Importar examen desde Excel",
+    description="""
+    Permite cargar preguntas y opciones a un examen desde un archivo .xlsx.
+    
+    El archivo debe contener las siguientes columnas (identificadas por el nombre del encabezado):
+    - `EXAMEN`: Nombre del examen (opcional, se usa para agrupar).
+    - `PREGUNTA`: El enunciado de la pregunta.
+    - `OPCION_1` a `OPCION_10`: Las opciones de respuesta.
+    - `CORRECTA`: El número de la opción correcta (1-10).
+    - `PUNTOS`: Valor de la pregunta (default 10).
+    - `TIEMPO`: Tiempo disponible en segundos (default 60).
+    - `TIPO`: ID del tipo de pregunta (1: Opción Múltiple, etc.).
+    """,
+    request={
+        'multipart/form-data': {
+            'type': 'object',
+            'properties': {
+                'file': {'type': 'string', 'format': 'binary', 'description': 'Archivo .xlsx con el formato especificado'},
+                'exa_cod': {'type': 'string', 'description': 'Código del examen existente (opcional)'}
+            }
+        }
+    },
+    responses={200: inline_serializer(name='ImportExamResponse', fields={
+        'status': serializers.CharField(),
+        'exa_cod': serializers.CharField(),
+        'preguntas_creadas': serializers.IntegerField(),
+        'errores': serializers.ListField(child=serializers.DictField()),
+    })},
+    examples=[
+        OpenApiExample(
+            'Respuesta Exitosa',
+            value={
+                'status': 'completado',
+                'exa_cod': 'EX_A1B2C3D4',
+                'preguntas_creadas': 25,
+                'errores': []
+            },
+            response_only=True
+        )
+    ]
+)
 class ImportExamView(APIView):
     """
     Importa preguntas a un Examen desde Excel.
@@ -339,6 +383,43 @@ class ExamenViewSet(viewsets.ModelViewSet):
         wb.save(response)
         return response
 
+    @extend_schema(
+        summary="Iniciar o reanudar un intento de examen",
+        description="""
+        Verifica si el usuario tiene un intento pendiente para este examen. 
+        Si existe, lo reanuda devolviendo las preguntas y respuestas guardadas.
+        Si no existe, genera una nueva selección de preguntas basada en la categoría del usuario.
+        """,
+        responses={200: inline_serializer(name='StartResumeResponse', fields={
+            'int_cod': serializers.CharField(help_text="Código único del intento"),
+            'exa_nom': serializers.CharField(),
+            'exa_des': serializers.CharField(),
+            'questions': PreguntaSerializer(many=True),
+            'respuestas': serializers.ListField(child=serializers.DictField(), help_text="Respuestas guardadas anteriormente"),
+        })},
+        examples=[
+            OpenApiExample(
+                'Respuesta de Intento Nuevo',
+                value={
+                    'int_cod': 'user123_EX_DEMO_1',
+                    'exa_nom': 'Examen de Prueba',
+                    'exa_des': 'Descripción del examen',
+                    'questions': [
+                        {
+                            'pre_cod': 'PRE_123',
+                            'pre_tex': '¿Cuál es la capital de Francia?',
+                            'options': [
+                                {'opc_cod': 'OPC_1', 'opc_tex': 'París'},
+                                {'opc_cod': 'OPC_2', 'opc_tex': 'Londres'}
+                            ]
+                        }
+                    ],
+                    'respuestas': []
+                },
+                response_only=True
+            )
+        ]
+    )
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
     def start_or_resume(self, request, pk=None):
         """
@@ -440,6 +521,40 @@ class ExamenViewSet(viewsets.ModelViewSet):
             'respuestas': respuestas_guardadas
         })
 
+    @extend_schema(
+        summary="Guardar progreso de un intento",
+        description="""
+        Permite guardar de forma parcial las respuestas del usuario durante el examen.
+        Esto permite al usuario cerrar el examen y retomarlo después sin perder su avance.
+        """,
+        request=inline_serializer(name='SaveProgressRequest', fields={
+            'int_cod': serializers.CharField(help_text="Código del intento en curso"),
+            'respuestas': serializers.ListField(
+                child=inline_serializer(
+                    name='RespuestaProgress',
+                    fields={
+                        'pre_cod': serializers.CharField(),
+                        'opc_cod': serializers.CharField(required=False),
+                        'res_tex': serializers.CharField(required=False),
+                    }
+                )
+            ),
+        }),
+        responses={200: inline_serializer(name='SaveProgressResponse', fields={'status': serializers.CharField()})},
+        examples=[
+            OpenApiExample(
+                'Ejemplo de Guardado',
+                value={
+                    'int_cod': 'user123_EX_DEMO_1',
+                    'respuestas': [
+                        {'pre_cod': 'PRE_123', 'opc_cod': 'OPC_1'},
+                        {'pre_cod': 'PRE_456', 'res_tex': 'Respuesta abierta'}
+                    ]
+                },
+                request_only=True
+            )
+        ]
+    )
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def save_progress(self, request, pk=None):
         """Guarda respuesta en modo intento interrumpible"""
@@ -764,6 +879,32 @@ class ExamenViewSet(viewsets.ModelViewSet):
             
         return response
 
+    @extend_schema(
+        summary="Finalizar un intento de examen",
+        description="""
+        Cierra el intento de examen, calcula el puntaje final basado en las respuestas guardadas
+        y actualiza las estadísticas del usuario si el intento es válido (dentro de los primeros N intentos).
+        """,
+        request=inline_serializer(name='FinishAttemptRequest', fields={
+            'int_cod': serializers.CharField(help_text="Código del intento a finalizar"),
+        }),
+        responses={200: inline_serializer(name='FinishAttemptResponse', fields={
+            'status': serializers.CharField(),
+            'score': serializers.IntegerField(help_text="Puntaje total obtenido"),
+            'correct_count': serializers.IntegerField(help_text="Número de respuestas correctas"),
+        })},
+        examples=[
+            OpenApiExample(
+                'Resultado Final',
+                value={
+                    'status': 'finalizado',
+                    'score': 85,
+                    'correct_count': 17,
+                },
+                response_only=True
+            )
+        ]
+    )
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def finish_attempt(self, request, pk=None):
         MAX_SCORED_ATTEMPTS = 3

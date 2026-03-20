@@ -7,6 +7,8 @@ from django.contrib.auth import authenticate
 from django.utils import timezone
 from datetime import timedelta
 import openpyxl
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, inline_serializer, OpenApiExample
+from rest_framework import serializers
 
 from .models import User, Rango
 from .serializers import UserSerializer, RangoSerializer, UserListSerializer
@@ -18,6 +20,48 @@ class IsStaff(IsAuthenticated):
         return super().has_permission(request, view) and request.user.is_staff
 
 
+@extend_schema(
+    summary="Login de usuario",
+    description="""
+    Autentica a un usuario usando su código (username) y DNI (password). 
+    Devuelve los datos detallados del usuario si la autenticación es exitosa.
+    """,
+    request=inline_serializer(
+        name='LoginRequest',
+        fields={
+            'username': serializers.CharField(help_text="Código del asesor o analista"),
+            'dni': serializers.CharField(help_text="Número de documento de identidad"),
+        }
+    ),
+    responses={
+        200: UserSerializer,
+        400: inline_serializer(name='LoginError400', fields={'error': serializers.CharField()}),
+        401: inline_serializer(name='LoginError401', fields={'error': serializers.CharField()}),
+    },
+    examples=[
+        OpenApiExample(
+            'Ejemplo de Petición',
+            value={
+                'username': 'asesor_demo',
+                'dni': '12345678'
+            },
+            request_only=True,
+        ),
+        OpenApiExample(
+            'Respuesta Exitosa',
+            value={
+                'usu_cod': 'asesor_demo',
+                'username': 'asesor_demo',
+                'usu_dni': '12345678',
+                'usu_nom': 'JUAN PEREZ',
+                'usu_pun_tot': 1500,
+                'is_staff': False
+            },
+            response_only=True,
+            status_codes=["200"]
+        )
+    ]
+)
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
@@ -63,6 +107,41 @@ class UserListView(APIView):
         return Response(serializer.data)
 
 
+@extend_schema(
+    summary="Importar usuarios desde Excel",
+    description="""
+    Permite cargar una lista de usuarios desde un archivo .xlsx. 
+    Realiza un proceso de **UPSERT** basado en el DNI.
+    
+    El archivo debe contener las siguientes columnas (encabezados):
+    - `ASESOR ANALISTA`: El código del usuario.
+    - `NUMERO DOCUMENTO`: DNI del usuario.
+    - `NOMBRE COMPLETO`: Nombres y apellidos.
+    - `GENERO`: MASCULINO o FEMENINO.
+    - `EDAD`: Número entero.
+    - `ZONA`: Ubicación geográfica.
+    - `ANTIGUEDAD`: Años en la empresa.
+    - `CATEGORIA`: Código de la categoría asignada.
+    """,
+    responses={200: inline_serializer(name='ImportResponse', fields={
+        'creados': serializers.IntegerField(),
+        'actualizados': serializers.IntegerField(),
+        'errores': serializers.ListField(child=serializers.DictField()),
+        'total_procesados': serializers.IntegerField(),
+    })},
+    examples=[
+        OpenApiExample(
+            'Respuesta de Importación',
+            value={
+                'creados': 10,
+                'actualizados': 5,
+                'errores': [],
+                'total_procesados': 15
+            },
+            response_only=True,
+        )
+    ]
+)
 class ImportUsersView(APIView):
     """
     Importa usuarios desde un archivo Excel (.xlsx).
@@ -232,6 +311,22 @@ class ExportUserTemplateView(APIView):
         return response
 
 
+@extend_schema(
+    summary="Limpiar usuarios inactivos",
+    description="Elimina o resetea puntos de usuarios que no han iniciado sesión en N meses.",
+    request=inline_serializer(
+        name='CleanupRequest',
+        fields={
+            'months': serializers.IntegerField(default=2),
+            'delete': serializers.BooleanField(default=False),
+        }
+    ),
+    responses={200: inline_serializer(name='CleanupResponse', fields={
+        'accion': serializers.CharField(),
+        'cantidad': serializers.IntegerField(),
+        'mensaje': serializers.CharField(),
+    })}
+)
 class CleanupInactiveUsersView(APIView):
     """
     Limpia usuarios inactivos.
